@@ -1,0 +1,12 @@
+{
+  "name": "Atmosphere AI: Smart Weather Intelligence",
+  "description": "A high-performance weather dashboard with AI-driven atmospheric insights and dynamic, context-aware glassmorphic UI.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "Weather Intelligence",
+    "Smart Alerts",
+    "Dynamic City Backgrounds"
+  ]
+}
