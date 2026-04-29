@@ -28,12 +28,28 @@ async function getCached(url: string, params: any) {
 const app = express();
 app.use(express.json());
 
+const sanitizeKey = (key: string | undefined): string | null => {
+  if (!key) return null;
+  // Deep clean: remove all whitespace and leading/trailing quotes (single or double)
+  const sanitized = key.trim().replace(/^["']|["']$/g, '').trim();
+  
+  const placeholders = [
+    'YOUR_GEMINI_API_KEY',
+    'YOUR_OPENWEATHER_API_KEY',
+    'YOUR_PIXABAY_API_KEY',
+    'ADD_YOUR_KEY_HERE',
+    ''
+  ];
+  
+  return (sanitized && !placeholders.includes(sanitized)) ? sanitized : null;
+};
+
 // API Proxy Routes
 app.get('/api/weather', async (req, res) => {
   const { city, lat, lon, units = 'metric' } = req.query;
-  const apiKey = process.env.OPENWEATHER_API_KEY?.trim();
-  if (!apiKey || apiKey === 'YOUR_OPENWEATHER_API_KEY') {
-    return res.status(500).json({ message: 'OPENWEATHER_API_KEY is not configured on the server. Please add it to your environment variables.' });
+  const apiKey = sanitizeKey(process.env.OPENWEATHER_API_KEY);
+  if (!apiKey) {
+    return res.status(500).json({ message: 'OPENWEATHER_API_KEY is not configured on the server. Please add it to your environment variables in Settings.' });
   }
   try {
     const params: any = { appid: apiKey, units };
@@ -52,8 +68,8 @@ app.get('/api/weather', async (req, res) => {
 
 app.get('/api/forecast', async (req, res) => {
   const { city, lat, lon, units = 'metric' } = req.query;
-  const apiKey = process.env.OPENWEATHER_API_KEY?.trim();
-  if (!apiKey || apiKey === 'YOUR_OPENWEATHER_API_KEY') {
+  const apiKey = sanitizeKey(process.env.OPENWEATHER_API_KEY);
+  if (!apiKey) {
     return res.status(500).json({ message: 'OPENWEATHER_API_KEY is not configured.' });
   }
   try {
@@ -73,8 +89,8 @@ app.get('/api/forecast', async (req, res) => {
 
 app.get('/api/pollution', async (req, res) => {
   const { lat, lon } = req.query;
-  const apiKey = process.env.OPENWEATHER_API_KEY?.trim();
-  if (!apiKey || apiKey === 'YOUR_OPENWEATHER_API_KEY') {
+  const apiKey = sanitizeKey(process.env.OPENWEATHER_API_KEY);
+  if (!apiKey) {
     return res.status(500).json({ message: 'OPENWEATHER_API_KEY is not configured.' });
   }
   try {
@@ -97,8 +113,8 @@ app.get('/api/uv', async (req, res) => {
 
 app.get('/api/images', async (req, res) => {
   const { q } = req.query;
-  const apiKey = process.env.PIXABAY_API_KEY?.trim();
-  if (!apiKey || apiKey === 'YOUR_PIXABAY_API_KEY') {
+  const apiKey = sanitizeKey(process.env.PIXABAY_API_KEY);
+  if (!apiKey) {
     return res.status(500).json({ message: 'PIXABAY_API_KEY is not configured.' });
   }
   try {
@@ -111,9 +127,9 @@ app.get('/api/images', async (req, res) => {
 
 app.post('/api/ai-insight', async (req, res) => {
   const { prompt } = req.body;
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey || apiKey === 'YOUR_GEMINI_API_KEY') {
-    return res.status(500).json({ message: 'GEMINI_API_KEY is not configured on the server. Please add it to your environment variables.' });
+  const apiKey = sanitizeKey(process.env.GEMINI_API_KEY);
+  if (!apiKey) {
+    return res.status(500).json({ message: 'GEMINI_API_KEY is not configured on the server. Please add it to your environment variables in Settings.' });
   }
   
   try {
@@ -133,8 +149,8 @@ app.post('/api/ai-insight', async (req, res) => {
 
 app.post('/api/ai-chat', async (req, res) => {
   const { prompt } = req.body;
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey || apiKey === 'YOUR_GEMINI_API_KEY') {
+  const apiKey = sanitizeKey(process.env.GEMINI_API_KEY);
+  if (!apiKey) {
     return res.status(500).json({ message: 'GEMINI_API_KEY is not configured on the server.' });
   }
   
