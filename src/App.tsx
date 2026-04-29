@@ -34,7 +34,6 @@ import {
 } from 'lucide-react';
 import Globe from "@/components/ui/globe";
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI } from "@google/genai";
 import {
   PromptInput,
   PromptInputAction,
@@ -106,9 +105,6 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
   return date.toLocaleString('en-GB', { ...options, timeZone: 'UTC' });
 };
 
-  // AI Initialization
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-
   const getAIIcon = (type: string) => {
     switch (type) {
       case 'clothing': return '👕';
@@ -128,6 +124,12 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
 
     // Protected Error Setter
     const setSafeError = React.useCallback((msg: string | null) => {
+      // Allow invalid API key messages to pass through so users can fix their settings
+      if (msg && (msg.includes('GEMINI_API_KEY') || msg.includes('API key not valid'))) {
+        setError(msg);
+        return;
+      }
+
       if (msg && (msg.toLowerCase().includes('gemini') || msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('resource_exhausted'))) {
         console.warn('Suppressed UI Error:', msg);
         return;
@@ -464,11 +466,6 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
   }, [unit, pollution]);
   
   const generateAiInsight = React.useCallback(async (w: WeatherData, f: ForecastData) => {
-    if (!process.env.GEMINI_API_KEY) {
-      applyFallbackInsights(w);
-      return;
-    }
-
     const cacheKey = `${w.name}-${unit}`;
     const now = Date.now();
     
@@ -495,13 +492,18 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
       }
       Context: AQI ${pollution?.list[0].main.aqi || 'unknown'}. Keep each under 10 words.`;
 
-      // Use the syntax compatible with the installed @google/genai version
-      // @ts-ignore - The types for this specific package version might be mismatching
-      const result = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
+      const response = await fetch('/api/ai-insight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
       });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || errorData.details || 'AI Insight API failed');
+      }
       
+      const result = await response.json();
       const output = result.text.replace(/```json/g, '').replace(/```/g, '').trim();
       const parsedData = JSON.parse(output);
       
@@ -517,10 +519,9 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
       } else {
         console.error('AI Insight failed', err);
       }
-      
       applyFallbackInsights(w);
     }
-  }, [unit, pollution, applyFallbackInsights, ai]);
+  }, [unit, pollution, applyFallbackInsights]);
 
   const updateAllData = React.useCallback((wData: WeatherData, fData: ForecastData) => {
     setWeather(wData);
@@ -612,8 +613,6 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
     setIsThinking(true);
 
     try {
-      if (!process.env.GEMINI_API_KEY) throw new Error('NO_KEY');
-      
       const nextRain = forecast.list.find(item => item.weather[0].main.toLowerCase().includes('rain'));
       const rainContext = nextRain ? `Rain expected at ${new Date(nextRain.dt * 1000).toLocaleTimeString()}.` : "No rain expected soon.";
 
@@ -627,10 +626,17 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
       User Question: "${userMsg}"
       Answer succinctly, helpfully, and with local context. If they ask about activities, be specific to the weather. Use emojis. Max 40 words.`;
 
-      const result = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
+      const response = await fetch('/api/ai-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
       });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || errorData.details || 'AI Chat API failed');
+      }
+      const result = await response.json();
 
       setChatHistory(prev => [...prev, { role: 'ai', text: result.text || "I'm sorry, I couldn't process that." }]);
     } catch (e: any) {

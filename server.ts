@@ -4,6 +4,7 @@ import axios from 'axios';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 dotenv.config();
 
@@ -24,80 +25,139 @@ async function getCached(url: string, params: any) {
   return response.data;
 }
 
+const app = express();
+app.use(express.json());
+
+// API Proxy Routes
+app.get('/api/weather', async (req, res) => {
+  const { city, lat, lon, units = 'metric' } = req.query;
+  const apiKey = process.env.OPENWEATHER_API_KEY?.trim();
+  if (!apiKey || apiKey === 'YOUR_OPENWEATHER_API_KEY') {
+    return res.status(500).json({ message: 'OPENWEATHER_API_KEY is not configured on the server. Please add it to your environment variables.' });
+  }
+  try {
+    const params: any = { appid: apiKey, units };
+    if (lat && lon) {
+      params.lat = lat;
+      params.lon = lon;
+    } else {
+      params.q = city;
+    }
+    const data = await getCached(`https://api.openweathermap.org/data/2.5/weather`, params);
+    res.json(data);
+  } catch (error: any) {
+    res.status(error.response?.status || 500).json(error.response?.data || { message: 'Internal Server Error' });
+  }
+});
+
+app.get('/api/forecast', async (req, res) => {
+  const { city, lat, lon, units = 'metric' } = req.query;
+  const apiKey = process.env.OPENWEATHER_API_KEY?.trim();
+  if (!apiKey || apiKey === 'YOUR_OPENWEATHER_API_KEY') {
+    return res.status(500).json({ message: 'OPENWEATHER_API_KEY is not configured.' });
+  }
+  try {
+    const params: any = { appid: apiKey, units };
+    if (lat && lon) {
+      params.lat = lat;
+      params.lon = lon;
+    } else {
+      params.q = city;
+    }
+    const data = await getCached(`https://api.openweathermap.org/data/2.5/forecast`, params);
+    res.json(data);
+  } catch (error: any) {
+    res.status(error.response?.status || 500).json(error.response?.data || { message: 'Internal Server Error' });
+  }
+});
+
+app.get('/api/pollution', async (req, res) => {
+  const { lat, lon } = req.query;
+  const apiKey = process.env.OPENWEATHER_API_KEY?.trim();
+  if (!apiKey || apiKey === 'YOUR_OPENWEATHER_API_KEY') {
+    return res.status(500).json({ message: 'OPENWEATHER_API_KEY is not configured.' });
+  }
+  try {
+    const data = await getCached(`https://api.openweathermap.org/data/2.5/air_pollution`, { lat, lon, appid: apiKey });
+    res.json(data);
+  } catch (error: any) {
+    res.status(error.response?.status || 500).json(error.response?.data || { message: 'Internal Server Error' });
+  }
+});
+
+app.get('/api/uv', async (req, res) => {
+  const { lat, lon } = req.query;
+  try {
+    const data = await getCached(`https://api.open-meteo.com/v1/forecast`, { latitude: lat, longitude: lon, daily: 'uv_index_max', timezone: 'auto', forecast_days: 1 });
+    res.json(data);
+  } catch (error: any) {
+    res.status(error.response?.status || 500).json(error.response?.data || { message: 'Internal Server Error' });
+  }
+});
+
+app.get('/api/images', async (req, res) => {
+  const { q } = req.query;
+  const apiKey = process.env.PIXABAY_API_KEY?.trim();
+  if (!apiKey || apiKey === 'YOUR_PIXABAY_API_KEY') {
+    return res.status(500).json({ message: 'PIXABAY_API_KEY is not configured.' });
+  }
+  try {
+    const data = await getCached(`https://pixabay.com/api/`, { key: apiKey, q, image_type: 'photo', category: 'places' });
+    res.json(data);
+  } catch (error: any) {
+    res.status(error.response?.status || 500).json(error.response?.data || { message: 'Internal Server Error' });
+  }
+});
+
+app.post('/api/ai-insight', async (req, res) => {
+  const { prompt } = req.body;
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey || apiKey === 'YOUR_GEMINI_API_KEY') {
+    return res.status(500).json({ message: 'GEMINI_API_KEY is not configured on the server. Please add it to your environment variables.' });
+  }
+  
+  try {
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const result = await model.generateContent(prompt);
+    res.json({ text: result.response.text() });
+  } catch (error: any) {
+    console.error('Gemini API Insight Error:', error.message || error);
+    const isInvalidKey = error.message?.includes('API key not valid') || error.message?.includes('API_KEY_INVALID');
+    res.status(isInvalidKey ? 401 : 500).json({ 
+      message: isInvalidKey ? 'The provided GEMINI_API_KEY is invalid. Please check your Gemini API key in settings.' : 'Failed to generate AI insight',
+      details: error.message || 'Unknown error'
+    });
+  }
+});
+
+app.post('/api/ai-chat', async (req, res) => {
+  const { prompt } = req.body;
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey || apiKey === 'YOUR_GEMINI_API_KEY') {
+    return res.status(500).json({ message: 'GEMINI_API_KEY is not configured on the server.' });
+  }
+  
+  try {
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const result = await model.generateContent(prompt);
+    res.json({ text: result.response.text() });
+  } catch (error: any) {
+    console.error('Gemini Chat Error:', error.message || error);
+    const isInvalidKey = error.message?.includes('API key not valid') || error.message?.includes('API_KEY_INVALID');
+    res.status(isInvalidKey ? 401 : 500).json({ 
+      message: isInvalidKey ? 'The provided GEMINI_API_KEY is invalid. Please check your settings.' : 'Failed to generate AI response',
+      details: error.message || 'Unknown error'
+    });
+  }
+});
+
+// For Vercel, we export the app
+export default app;
+
 async function startServer() {
-  const app = express();
   const PORT = 3000;
-
-  app.use(express.json());
-
-  // API Proxy Routes
-  app.get('/api/weather', async (req, res) => {
-    const { city, lat, lon, units = 'metric' } = req.query;
-    const apiKey = process.env.OPENWEATHER_API_KEY;
-    try {
-      const params: any = { appid: apiKey, units };
-      if (lat && lon) {
-        params.lat = lat;
-        params.lon = lon;
-      } else {
-        params.q = city;
-      }
-      const data = await getCached(`https://api.openweathermap.org/data/2.5/weather`, params);
-      res.json(data);
-    } catch (error: any) {
-      res.status(error.response?.status || 500).json(error.response?.data || { message: 'Internal Server Error' });
-    }
-  });
-
-  app.get('/api/forecast', async (req, res) => {
-    const { city, lat, lon, units = 'metric' } = req.query;
-    const apiKey = process.env.OPENWEATHER_API_KEY;
-    try {
-      const params: any = { appid: apiKey, units };
-      if (lat && lon) {
-        params.lat = lat;
-        params.lon = lon;
-      } else {
-        params.q = city;
-      }
-      const data = await getCached(`https://api.openweathermap.org/data/2.5/forecast`, params);
-      res.json(data);
-    } catch (error: any) {
-      res.status(error.response?.status || 500).json(error.response?.data || { message: 'Internal Server Error' });
-    }
-  });
-
-  app.get('/api/pollution', async (req, res) => {
-    const { lat, lon } = req.query;
-    const apiKey = process.env.OPENWEATHER_API_KEY;
-    try {
-      const data = await getCached(`https://api.openweathermap.org/data/2.5/air_pollution`, { lat, lon, appid: apiKey });
-      res.json(data);
-    } catch (error: any) {
-      res.status(error.response?.status || 500).json(error.response?.data || { message: 'Internal Server Error' });
-    }
-  });
-
-  app.get('/api/uv', async (req, res) => {
-    const { lat, lon } = req.query;
-    try {
-      const data = await getCached(`https://api.open-meteo.com/v1/forecast`, { latitude: lat, longitude: lon, daily: 'uv_index_max', timezone: 'auto', forecast_days: 1 });
-      res.json(data);
-    } catch (error: any) {
-      res.status(error.response?.status || 500).json(error.response?.data || { message: 'Internal Server Error' });
-    }
-  });
-
-  app.get('/api/images', async (req, res) => {
-    const { q } = req.query;
-    const apiKey = process.env.PIXABAY_API_KEY;
-    try {
-      const data = await getCached(`https://pixabay.com/api/`, { key: apiKey, q, image_type: 'photo', category: 'places' });
-      res.json(data);
-    } catch (error: any) {
-      res.status(error.response?.status || 500).json(error.response?.data || { message: 'Internal Server Error' });
-    }
-  });
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
@@ -114,9 +174,12 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  // Only listen if not on Vercel
+  if (!process.env.VERCEL) {
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  }
 }
 
 startServer();
