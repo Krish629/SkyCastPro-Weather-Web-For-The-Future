@@ -784,11 +784,11 @@ const WeatherParticles = React.memo(({ type, description, isNight }: { type: str
                   <div className="w-10 h-10 rounded-full bg-rose-500/20 flex items-center justify-center text-rose-400">
                     <AlertCircle size={20} />
                   </div>
-                  <div className="flex flex-col flex-1">
-                    <span className="text-[11px] font-black text-rose-300 uppercase tracking-widest">{alert.event}</span>
-                    <p className="text-sm text-white/90 font-medium">{alert.description}</p>
+                  <div className="flex flex-col flex-1 min-w-0">
+                    <span className="text-[11px] font-black text-rose-300 uppercase tracking-widest truncate">{alert.event}</span>
+                    <p className="text-sm text-white/90 font-medium line-clamp-2">{alert.description}</p>
                   </div>
-                  <button onClick={() => setAlerts(prev => prev.filter((_, i) => i !== idx))} className="text-white/40 hover:text-white transition-colors">
+                  <button onClick={() => setAlerts(prev => prev.filter((_, i) => i !== idx))} className="text-white/40 hover:text-white transition-colors flex-shrink-0 p-1">
                     <X size={16} />
                   </button>
                 </motion.div>
@@ -852,7 +852,7 @@ const WeatherParticles = React.memo(({ type, description, isNight }: { type: str
                     )}
                   </div>
                 </motion.div>
-                <div className="text-[10px] sm:text-xs text-white/40 font-bold tracking-widest uppercase flex flex-col items-end">
+                <div className="text-[10px] sm:text-xs text-white/40 font-bold tracking-widest uppercase flex flex-col items-end flex-shrink-0">
                   <span>{weather ? formatLocalTime(weather.dt, weather.timezone, { weekday: 'long', day: 'numeric', month: 'long' }) : '...'}</span>
                   <ClockDisplay timezone={weather?.timezone || 0} weatherDt={weather?.dt || 0} />
                 </div>
@@ -1014,16 +1014,16 @@ const WeatherParticles = React.memo(({ type, description, isNight }: { type: str
                   </div>
                 </div>
 
-                {/* Smart Alert Sub-panel (New detailed design) */}
+                {/* Smart Alert Sub-panel (Responsive design: relative on mobile, absolute on larger screens) */}
                 {smartAlert && (
                   <motion.div 
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="absolute top-6 right-6 lg:relative lg:top-0 lg:right-0 bg-white/10 backdrop-blur-xl border border-white/20 p-4 rounded-2xl max-w-[180px] z-20 shadow-xl"
+                    className="order-3 sm:order-none relative sm:absolute sm:top-6 sm:right-6 lg:relative lg:top-0 lg:right-0 bg-white/10 backdrop-blur-xl border border-white/20 p-4 rounded-2xl w-full sm:max-w-[200px] lg:max-w-[180px] z-20 shadow-xl mt-4 sm:mt-0"
                   >
                     <div className={`flex items-center gap-2 mb-2 ${smartAlert.color}`}>
-                      <AlertCircle size={14} />
-                      <span className="text-[10px] font-black uppercase tracking-tighter">{smartAlert.title}</span>
+                      <AlertCircle size={14} className="flex-shrink-0" />
+                      <span className="text-[10px] font-black uppercase tracking-tighter whitespace-nowrap">{smartAlert.title}</span>
                     </div>
                     <p className="text-xs font-bold text-white mb-1">{smartAlert.info}</p>
                     <p className="text-[9px] leading-tight text-white/60 font-medium">{smartAlert.advice}</p>
@@ -1031,7 +1031,7 @@ const WeatherParticles = React.memo(({ type, description, isNight }: { type: str
                 )}
 
                 {/* Weather Illustration Area */}
-                <div className="relative w-48 h-48 sm:w-64 sm:h-64 mt-8 sm:mt-0">
+                <div className="relative w-48 h-48 sm:w-64 sm:h-64 mt-8 sm:mt-0 order-2 sm:order-none">
                   <div className="absolute inset-0 bg-blue-400/10 blur-[60px] rounded-full"></div>
                   <motion.div 
                     animate={{ y: [0, -10, 0] }}
