@@ -1,22 +1,22 @@
-import { VercelRequest, VercelResponse } from '@vercel/node';
-import { getCached } from './_utils';
-
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+// api/uv.ts
+export default async function handler(req: any, res: any) {
   const { lat, lon } = req.query;
   try {
-    const data = await getCached(`https://api.open-meteo.com/v1/forecast`, { 
-      latitude: lat, 
-      longitude: lon, 
+    const query = new URLSearchParams({ 
+      latitude: String(lat), 
+      longitude: String(lon), 
       daily: 'uv_index_max', 
       timezone: 'auto', 
-      forecast_days: 1 
-    });
+      forecast_days: '1' 
+    }).toString();
+    const url = `https://api.open-meteo.com/v1/forecast?${query}`;
+    
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (!response.ok) return res.status(response.status).json(data);
     return res.status(200).json(data);
   } catch (error: any) {
-    console.error('UV API Error:', error.response?.data || error.message);
-    return res.status(error.response?.status || 500).json({
-      error: 'UV API Error',
-      message: error.response?.data?.message || error.message || 'Internal Server Error'
-    });
+    return res.status(500).json({ error: 'UV Error', message: error.message });
   }
 }

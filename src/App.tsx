@@ -426,10 +426,6 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
     }
   }, [apiFetch]);
 
-  // AI Insight Cache & Rate Limiting
-  const insightCacheRef = useRef<Record<string, { data: any, timestamp: number }>>({});
-  const lastThrottleRef = useRef<number>(0);
-
   const updateAllData = React.useCallback((wData: WeatherData, fData: ForecastData) => {
     setWeather(wData);
     setForecast(fData);
