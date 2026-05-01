@@ -20,31 +20,19 @@ import {
   Settings2,
   Calendar,
   Clock,
-  Sparkles,
-  Zap,
   Activity,
+  Zap,
   Mic,
   MicOff,
-  MessageSquare,
   X,
   ArrowUp,
-  Square,
   Globe as GlobeIcon,
   ChevronRight
 } from 'lucide-react';
 import Globe from "@/components/ui/globe";
 import { motion, AnimatePresence } from 'motion/react';
-import {
-  PromptInput,
-  PromptInputAction,
-  PromptInputActions,
-  PromptInputTextarea,
-} from "@/components/ui/prompt-input";
-import { Button } from "@/components/ui/button";
 import { GlowCard } from "@/components/ui/spotlight-card";
 import { ShineBorder } from "@/components/ui/shine-border";
-import { GoogleGenAI } from "@google/genai";
-
 import { Map, MapControls, MapMarker, MarkerContent, MarkerTooltip, MarkerPopup, MarkerLabel, useMap } from "@/components/ui/map";
 import { ThemeProvider as NextThemesProvider } from "next-themes";
 
@@ -106,16 +94,6 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
   return date.toLocaleString('en-GB', { ...options, timeZone: 'UTC' });
 };
 
-  const getAIIcon = (type: string) => {
-    switch (type) {
-      case 'clothing': return '👕';
-      case 'travel': return '🚗';
-      case 'health': return '😷';
-      case 'activity': return '🏃';
-      default: return '💡';
-    }
-  };
-
   export default function App() {
     const [city, setCity] = useState('');
     const [weather, setWeather] = useState<WeatherData | null>(null);
@@ -125,35 +103,43 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
 
     // Protected Error Setter
     const setSafeError = React.useCallback((msg: string | null) => {
-      // Allow invalid API key messages to pass through so users can fix their settings
-      if (msg && (msg.toLowerCase().includes('key') || msg.includes('GEMINI_API_KEY') || msg.toLowerCase().includes('api settings'))) {
-        setError(msg);
-        return;
-      }
-
-      if (msg && (msg.toLowerCase().includes('gemini') || msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('resource_exhausted'))) {
-        console.warn('Suppressed UI Error:', msg);
-        return;
-      }
       setError(msg);
+    }, []);
+
+    const apiFetch = React.useCallback(async (url: string, options?: RequestInit) => {
+      try {
+        const res = await fetch(url, options);
+        const text = await res.text();
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          if (!res.ok) throw new Error(`Server error ${res.status}: ${text.substring(0, 100)}`);
+          throw new Error(`Unexpected non-JSON response from server`);
+        }
+        
+        if (!res.ok) {
+          const error = new Error(data.message || data.error || `Request failed with status ${res.status}`);
+          (error as any).code = data.code;
+          throw error;
+        }
+        return data;
+      } catch (err: any) {
+        console.error(`API Fetch Error (${url}):`, err.message);
+        throw err;
+      }
     }, []);
 
     const [unit, setUnit] = useState<'metric' | 'imperial'>('metric');
     const [bgImage, setBgImage] = useState(DEFAULT_BG);
-    const [aiInsights, setAiInsights] = useState<{clothing?: string; travel?: string; health?: string; activity?: string} | null>(null);
     const [pollution, setPollution] = useState<PollutionData | null>(null);
     const [uvIndex, setUvIndex] = useState<number | null>(null);
     const [currentTime, setCurrentTime] = useState<string>('');
     const [alerts, setAlerts] = useState<any[]>([]);
     const [isListening, setIsListening] = useState(false);
-    const [isAssistantOpen, setIsAssistantOpen] = useState(false);
-    const [chatHistory, setChatHistory] = useState<Array<{role: 'user' | 'ai', text: string}>>([]);
-    const [chatInput, setChatInput] = useState('');
-    const [isThinking, setIsThinking] = useState(false);
     const [isHyperlocal, setIsHyperlocal] = useState(false);
     const [isMapOpen, setIsMapOpen] = useState(false);
     const [isSearchFocused, setIsSearchFocused] = useState(false);
-    const [isAIFocused, setIsAIFocused] = useState(false);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [animCycle, setAnimCycle] = useState(0);
 
@@ -398,10 +384,7 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
 
     for (const q of queries) {
       try {
-        const res = await fetch(`/api/images?q=${encodeURIComponent(q)}`);
-        if (!res.ok) continue;
-        
-        const data = await res.json();
+        const data = await apiFetch(`/api/images?q=${encodeURIComponent(q)}`);
         
         if (data && data.hits && data.hits.length > 0) {
           // Select from top 8 results for more variety
@@ -421,117 +404,31 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
     
     // If all else fails
     setBgImage(DEFAULT_BG);
-  }, []);
+  }, [apiFetch]);
 
   const fetchPollution = React.useCallback(async (lat: number, lon: number) => {
     try {
-      const res = await fetch(`/api/pollution?lat=${lat}&lon=${lon}`);
-      const data = await res.json();
+      const data = await apiFetch(`/api/pollution?lat=${lat}&lon=${lon}`);
       setPollution(data);
-    } catch (e) {
-      console.error('Pollution fetch failed', e);
+    } catch (e: any) {
+      console.error('Pollution fetch failed', e.message);
     }
-  }, []);
+  }, [apiFetch]);
 
   const fetchUV = React.useCallback(async (lat: number, lon: number) => {
     try {
-      const res = await fetch(`/api/uv?lat=${lat}&lon=${lon}`);
-      const data = await res.json();
+      const data = await apiFetch(`/api/uv?lat=${lat}&lon=${lon}`);
       if (data.daily?.uv_index_max) {
         setUvIndex(data.daily.uv_index_max[0]);
       }
-    } catch (e) {
-      console.error('UV fetch failed', e);
+    } catch (e: any) {
+      console.error('UV fetch failed', e.message);
     }
-  }, []);
+  }, [apiFetch]);
 
   // AI Insight Cache & Rate Limiting
   const insightCacheRef = useRef<Record<string, { data: any, timestamp: number }>>({});
   const lastThrottleRef = useRef<number>(0);
-
-  const applyFallbackInsights = React.useCallback((w: WeatherData) => {
-    const temp = w.main.temp;
-    const isMetric = unit === 'metric';
-    const isCold = isMetric ? temp < 15 : temp < 59;
-    const isHot = isMetric ? temp > 28 : temp > 82;
-    const main = w.weather[0].main.toLowerCase();
-    const hasRain = main.includes('rain') || main.includes('drizzle') || main.includes('thunderstorm');
-    const aqi = pollution?.list[0].main.aqi || 0;
-
-    setAiInsights({
-      clothing: isCold ? "Wear a heavy jacket and layers." : isHot ? "Shorts and light fabrics recommended." : "A light jacket or sweater is perfect.",
-      travel: hasRain ? "Roads may be slippery; drive carefully." : "Clear skies for a smooth commute.",
-      health: aqi > 3 ? "Air quality is poor; stay indoors if possible." : "Air quality is good for all groups.",
-      activity: hasRain ? "Great day for reading or indoor cinema." : "Perfect conditions for outdoor exercise."
-    });
-  }, [unit, pollution]);
-  
-  // Assistant API Implementation using Modern SDK (Frontend)
-  const ai = useMemo(() => {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey || apiKey === 'REPLACE_ME') return null;
-    return new GoogleGenAI({ apiKey });
-  }, []);
-
-  const generateAiInsight = React.useCallback(async (w: WeatherData, f: ForecastData) => {
-    const cacheKey = `${w.name}-${unit}`;
-    const now = Date.now();
-    
-    // 1. Check local cache (30 min)
-    const cached = insightCacheRef.current[cacheKey];
-    if (cached && (now - cached.timestamp < 1800000)) {
-      setAiInsights(cached.data);
-      return;
-    }
-
-    // 2. Check global cooldown (10 min after any 429)
-    if (now - lastThrottleRef.current < 600000) {
-      applyFallbackInsights(w);
-      return;
-    }
-
-    if (!ai) {
-      console.warn('Gemini API key is missing. Falling back to local rules.');
-      applyFallbackInsights(w);
-      return;
-    }
-
-    try {
-      const prompt = `Act as an expert meteorologist. Return ONLY a JSON object:
-      {
-        "clothing": "outfit recommendation for ${w.main.temp}°${unit === 'metric' ? 'C' : 'F'}, ${w.weather[0].description}",
-        "travel": "commute and travel advice",
-        "health": "health risks (allergies, heat, etc)",
-        "activity": "outdoor/indoor activity suggestion"
-      }
-      Context: AQI ${pollution?.list[0].main.aqi || 'unknown'}. Keep each tip under 10 words. Use emojis.`;
-
-      const result = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [{ parts: [{ text: prompt }] }]
-      });
-      
-      const output = result.text.replace(/```json/g, '').replace(/```/g, '').trim();
-      const parsedData = JSON.parse(output);
-      
-      setAiInsights(parsedData);
-      insightCacheRef.current[cacheKey] = { data: parsedData, timestamp: now };
-    } catch (err: any) {
-      const errMsg = err?.message || String(err);
-      const isQuota = errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.toLowerCase().includes('quota');
-      const isKey = errMsg.includes('API_KEY_INVALID') || errMsg.includes('key not valid');
-      
-      if (isKey) {
-        setSafeError("GEMINI_API_KEY is invalid. Please check your settings.");
-      } else if (isQuota) {
-        lastThrottleRef.current = now;
-        console.warn('Weather AI throttled. Falling back to local rules.');
-      } else {
-        console.error('AI Insight failed', err);
-      }
-      applyFallbackInsights(w);
-    }
-  }, [unit, pollution, applyFallbackInsights, ai]);
 
   const updateAllData = React.useCallback((wData: WeatherData, fData: ForecastData) => {
     setWeather(wData);
@@ -550,21 +447,15 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
     fetchBackground(wData.name);
     fetchPollution(wData.coord.lat, wData.coord.lon);
     fetchUV(wData.coord.lat, wData.coord.lon);
-    generateAiInsight(wData, fData);
-  }, [unit, fetchBackground, fetchPollution, fetchUV, generateAiInsight]);
+  }, [unit, fetchBackground, fetchPollution, fetchUV]);
 
   const fetchWeatherByCoords = React.useCallback(async (lat: number, lon: number) => {
     setLoading(true);
     setError(null);
     setIsHyperlocal(true);
     try {
-      const wRes = await fetch(`/api/weather?lat=${lat}&lon=${lon}&units=${unit}`);
-      const wData = await wRes.json();
-      if (wRes.status !== 200) throw new Error(wData.message || 'Location not found');
-      
-      const fRes = await fetch(`/api/forecast?lat=${lat}&lon=${lon}&units=${unit}`);
-      const fData = await fRes.json();
-
+      const wData = await apiFetch(`/api/weather?lat=${lat}&lon=${lon}&units=${unit}`);
+      const fData = await apiFetch(`/api/forecast?lat=${lat}&lon=${lon}&units=${unit}`);
       updateAllData(wData, fData);
     } catch (err: any) {
       setSafeError(err.message);
@@ -580,13 +471,8 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
     setIsHyperlocal(false);
     try {
       const encodedCity = encodeURIComponent(searchCity);
-      const wRes = await fetch(`/api/weather?city=${encodedCity}&units=${unit}`);
-      const wData = await wRes.json();
-      if (wRes.status !== 200) throw new Error(wData.message || 'City not found');
-      
-      const fRes = await fetch(`/api/forecast?city=${encodedCity}&units=${unit}`);
-      const fData = await fRes.json();
-
+      const wData = await apiFetch(`/api/weather?city=${encodedCity}&units=${unit}`);
+      const fData = await apiFetch(`/api/forecast?city=${encodedCity}&units=${unit}`);
       updateAllData(wData, fData);
     } catch (err: any) {
       setSafeError(err.message);
@@ -613,66 +499,6 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
     }
   }, [unit, fetchWeather, weather]);
 
-
-  const askAssistant = async () => {
-    if (!chatInput.trim() || !weather || !forecast) return;
-    
-    const userMsg = chatInput;
-    setChatInput('');
-    setChatHistory(prev => [...prev, { role: 'user', text: userMsg }]);
-    setIsThinking(true);
-
-    if (!ai) {
-      setChatHistory(prev => [...prev, { role: 'ai', text: "I'm sorry, my AI brain (Gemini API key) isn't configured yet. Please add it in project settings! 🧠" }]);
-      setIsThinking(false);
-      return;
-    }
-
-    try {
-      const nextRain = forecast.list.find(item => item.weather[0].main.toLowerCase().includes('rain'));
-      const rainContext = nextRain ? `Rain expected at ${new Date(nextRain.dt * 1000).toLocaleTimeString()}.` : "No rain expected soon.";
-
-      const prompt = `Act as a personal weather assistant like "Atmosphere AI".
-      Current Location: ${weather.name}, ${weather.sys.country}
-      Current Weather: ${weather.main.temp}°${unit === 'metric' ? 'C' : 'F'}, ${weather.weather[0].description}
-      Forecast: ${rainContext}
-      Humidity: ${weather.main.humidity}%, Wind: ${weather.wind.speed}
-      AQI: ${pollution?.list[0].main.aqi || 'moderate'}, UV: ${uvIndex || 'safe'}
-      
-      User Question: "${userMsg}"
-      Answer succinctly, helpfully, and with local context. If they ask about activities, be specific to the weather. Use emojis. Max 40 words.`;
-
-      const result = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [{ parts: [{ text: prompt }] }]
-      });
-
-      setChatHistory(prev => [...prev, { role: 'ai', text: result.text || "I'm sorry, I couldn't process that." }]);
-    } catch (e: any) {
-      const errMsg = e?.message || String(e);
-      const isKey = errMsg.includes('API_KEY_INVALID') || errMsg.includes('key not valid');
-      
-      if (isKey) {
-        setChatHistory(prev => [...prev, { role: 'ai', text: "Your Gemini API Key seems to be invalid. Please check your project settings. 🔑" }]);
-      } else {
-        console.warn('Assistant API fallback triggered', errMsg);
-        let fallbackMsg = "Connecting to Satellite... 📡 ";
-        
-        if (userMsg.toLowerCase().includes('wear')) {
-          fallbackMsg += `Since it's ${Math.round(weather.main.temp)}°, ${weather.main.temp < 15 ? 'dress warmly with a coat!' : 'light comfortable clothes are best.'}`;
-        } else if (userMsg.toLowerCase().includes('rain')) {
-          const willRain = forecast.list.some(i => i.weather[0].main.toLowerCase().includes('rain'));
-          fallbackMsg += willRain ? "Keep an umbrella handy, rain is expected! ☔" : "No rain in the immediate outlook. ☀️";
-        } else {
-          fallbackMsg += `In ${weather.name}, it's currently ${Math.round(weather.main.temp)}° and ${weather.weather[0].main}. Stay safe!`;
-        }
-        
-        setChatHistory(prev => [...prev, { role: 'ai', text: fallbackMsg }]);
-      }
-    } finally {
-      setIsThinking(false);
-    }
-  };
 
   const isEvening = useMemo(() => {
     if (!weather) return false;
@@ -1111,34 +937,9 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
             )}
           </div>
 
-          {/* Right Column: AI Intelligence & Outlook */}
+          {/* Right Column: Outlook */}
           <div className="lg:w-80 flex flex-col gap-6 no-scrollbar lg:max-h-[90vh] lg:overflow-y-auto">
             
-            {/* AI Smart Insight Panel */}
-            {aiInsights && (
-              <motion.div variants={itemVariants}>
-                <GlowCard 
-                  glowColor="purple"
-                  customSize
-                  className="bg-gradient-to-br from-blue-500/10 to-indigo-500/10 backdrop-blur-xl border border-white/10 rounded-[32px] p-6 shadow-xl relative overflow-hidden"
-                >
-                  <div className="absolute top-0 right-0 p-4 opacity-5"><Sparkles size={40} /></div>
-                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-blue-400 mb-4 border-b border-white/5 pb-2">Intelligence Brief</h3>
-                  <div className="flex flex-col gap-3">
-                    {Object.entries(aiInsights).map(([key, value]) => (
-                      <div key={key} className="flex gap-3 items-start animate-in fade-in slide-in-from-left-2 duration-500">
-                        <span className="text-lg grayscale group-hover:grayscale-0 transition-all">{getAIIcon(key)}</span>
-                        <div className="flex flex-col">
-                          <span className="text-[9px] uppercase text-white/30 font-black">{key}</span>
-                          <p className="text-[11px] leading-tight text-white/80 font-medium">{value}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </GlowCard>
-              </motion.div>
-            )}
-
             {/* Weather Alerts if any */}
             {alerts.length > 0 && (
               <motion.div variants={itemVariants} className="flex flex-col gap-2">
@@ -1291,142 +1092,12 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
 
       {/* Subtle Footer */}
       <footer className="absolute bottom-6 left-0 right-0 z-20 flex justify-between items-center px-10 text-[9px] text-white/30 tracking-widest uppercase pointer-events-none">
-        <div>System Intelligence Active</div>
+        <div>Atmosphere Weather System</div>
         <div className="flex gap-6 pointer-events-auto">
           <span className="hover:text-white/60 transition-colors cursor-help">OpenWeatherMap</span>
           <span className="hover:text-white/60 transition-colors cursor-help">Pixabay Engine</span>
-          <span className="hover:text-white/60 transition-colors cursor-help">Neural Intelligence</span>
         </div>
       </footer>
-
-      {/* Floating AI Assistant Trigger */}
-      <button 
-        onClick={() => setIsAssistantOpen(true)}
-        className="fixed bottom-6 right-6 z-50 p-4 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl shadow-[0_0_20px_rgba(37,99,235,0.4)] transition-all hover:scale-110 active:scale-95 group"
-      >
-        <MessageSquare className="group-hover:animate-bounce" size={24} />
-        <span className="absolute -top-1 -right-1 w-3 h-3 bg-blue-400 rounded-full animate-ping"></span>
-      </button>
-
-      {/* AI Assistant Overlay */}
-      <AnimatePresence>
-        {isAssistantOpen && (
-          <>
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsAssistantOpen(false)}
-              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60]"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9, y: 100 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 100 }}
-              className="fixed bottom-24 right-6 w-[90vw] sm:w-[400px] max-h-[600px] glass-panel border border-white/20 rounded-[32px] z-[70] shadow-2xl flex flex-col overflow-hidden bg-brand-bg/95"
-            >
-              <div className="p-6 border-b border-white/5 flex justify-between items-center bg-white/5">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-blue-500/20 rounded-xl">
-                    <Sparkles size={20} className="text-blue-400" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-white">Atmosphere AI Assistant</h3>
-                    <p className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest">Active & Learning</p>
-                  </div>
-                </div>
-                <button onClick={() => setIsAssistantOpen(false)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
-                  <X size={20} className="text-white/40" />
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4 no-scrollbar">
-                {chatHistory.length === 0 && (
-                  <div className="h-full flex flex-col items-center justify-center text-center p-4">
-                    <Sparkles className="text-blue-400/20 mb-4" size={48} />
-                    <p className="text-sm text-white/50 font-medium">Hello! I'm your hyperlocal weather advisor. Ask me anything about the conditions or your plans.</p>
-                    <div className="grid grid-cols-1 gap-2 mt-6 w-full px-4">
-                      {["Should I go out now?", "Best time for a run?", "What should I wear?"].map(q => (
-                        <button 
-                          key={q}
-                          onClick={() => { setChatInput(q); }}
-                          className="text-[11px] font-bold text-left p-3 rounded-xl bg-white/5 border border-white/5 hover:border-blue-400/30 transition-all text-blue-300"
-                        >
-                          "{q}"
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {chatHistory.map((msg, i) => (
-                  <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[85%] p-4 rounded-2xl text-xs font-medium leading-relaxed ${
-                      msg.role === 'user' 
-                        ? 'bg-blue-600/20 text-blue-100 border border-blue-500/20' 
-                        : 'bg-white/5 text-white border border-white/10'
-                    }`}>
-                      {msg.text}
-                    </div>
-                  </div>
-                ))}
-                {isThinking && (
-                  <div className="flex justify-start">
-                    <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
-                      <div className="flex gap-1">
-                        <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" />
-                        <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce [animation-delay:0.2s]" />
-                        <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce [animation-delay:0.4s]" />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="p-4 bg-black/20">
-                <ShineBorder 
-                  isFocused={isAIFocused}
-                  color={["#a855f7", "#ec4899", "#3b82f6"]}
-                  className="rounded-2xl"
-                >
-                  <PromptInput
-                    value={chatInput}
-                    onValueChange={setChatInput}
-                    isLoading={isThinking}
-                    onSubmit={askAssistant}
-                    className="bg-black/40 border-white/10 rounded-2xl backdrop-blur-xl"
-                  >
-                    <PromptInputTextarea 
-                      placeholder="Ask the weather expert..." 
-                      className="text-white placeholder:text-white/30 text-xs py-3 px-4 min-h-[44px]"
-                      onFocus={() => setIsAIFocused(true)}
-                      onBlur={() => setIsAIFocused(false)}
-                    />
-                    <PromptInputActions className="justify-end pt-1">
-                      <PromptInputAction
-                        tooltip={isThinking ? "Thinking..." : "Send Advice Request"}
-                      >
-                        <Button
-                          variant="default"
-                          size="icon"
-                          className="h-8 w-8 rounded-full bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50"
-                          onClick={askAssistant}
-                          disabled={!chatInput.trim() || isThinking}
-                        >
-                          {isThinking ? (
-                            <Loader2 className="size-4 animate-spin" />
-                          ) : (
-                            <ArrowUp className="size-4" />
-                          )}
-                        </Button>
-                      </PromptInputAction>
-                    </PromptInputActions>
-                  </PromptInput>
-                </ShineBorder>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
     </div>
     </NextThemesProvider>
   );
