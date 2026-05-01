@@ -3,7 +3,7 @@ import React, { useEffect, useRef, ReactNode } from 'react';
 interface GlowCardProps {
   children: ReactNode;
   className?: string;
-  glowColor?: 'blue' | 'purple' | 'green' | 'red' | 'orange';
+  glowColor?: 'blue' | 'purple' | 'green' | 'red' | 'orange' | 'cyan';
   size?: 'sm' | 'md' | 'lg';
   width?: string | number;
   height?: string | number;
@@ -15,7 +15,8 @@ const glowColorMap = {
   purple: { base: 280, spread: 300 },
   green: { base: 120, spread: 200 },
   red: { base: 0, spread: 200 },
-  orange: { base: 30, spread: 200 }
+  orange: { base: 30, spread: 200 },
+  cyan: { base: 180, spread: 200 }
 };
 
 const sizeMap = {
@@ -37,29 +38,46 @@ const GlowCard: React.FC<GlowCardProps> = React.memo(({
 
   useEffect(() => {
     let rafId: number;
+    let isVisible = false;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        isVisible = entry.isIntersecting;
+      },
+      { threshold: 0.01 }
+    );
+
+    if (cardRef.current) {
+      observer.observe(cardRef.current);
+    }
+
     const syncPointer = (e: PointerEvent) => {
+      if (!isVisible) return;
+      
       const { clientX: x, clientY: y } = e;
       
+      cancelAnimationFrame(rafId);
       rafId = requestAnimationFrame(() => {
         if (cardRef.current) {
-          cardRef.current.style.setProperty('--x', x.toFixed(2));
+          cardRef.current.style.setProperty('--x', x.toFixed(1));
+          cardRef.current.style.setProperty('--y', y.toFixed(1));
           const xp = (x / window.innerWidth).toFixed(2);
           const yp = (y / window.innerHeight).toFixed(2);
           cardRef.current.style.setProperty('--xp', xp);
-          cardRef.current.style.setProperty('--y', y.toFixed(2));
           cardRef.current.style.setProperty('--yp', yp);
         }
       });
     };
 
-    document.addEventListener('pointermove', syncPointer, { passive: true });
+    window.addEventListener('pointermove', syncPointer, { passive: true });
     return () => {
-      document.removeEventListener('pointermove', syncPointer);
+      observer.disconnect();
+      window.removeEventListener('pointermove', syncPointer);
       cancelAnimationFrame(rafId);
     };
   }, []);
 
-  const { base, spread } = glowColorMap[glowColor];
+  const { base, spread } = glowColorMap[glowColor as keyof typeof glowColorMap] || glowColorMap.blue;
 
   // Determine sizing
   const getSizeClasses = () => {

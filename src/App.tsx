@@ -12,29 +12,28 @@ import {
   Eye, 
   Sunrise, 
   Sunset, 
+  Sun,
   Navigation, 
   AlertCircle,
   CloudRain,
   MapPin,
   Loader2,
-  Settings2,
   Calendar,
-  Clock,
   Activity,
   Zap,
   Mic,
   MicOff,
   X,
   ArrowUp,
-  Globe as GlobeIcon,
   ChevronRight
 } from 'lucide-react';
 import Globe from "@/components/ui/globe";
 import { motion, AnimatePresence } from 'motion/react';
 import { GlowCard } from "@/components/ui/spotlight-card";
 import { ShineBorder } from "@/components/ui/shine-border";
-import { Map, MapControls, MapMarker, MarkerContent, MarkerTooltip, MarkerPopup, MarkerLabel, useMap } from "@/components/ui/map";
+import { Map, MapControls, MapMarker, MarkerContent, MarkerTooltip, MarkerPopup, MarkerLabel } from "@/components/ui/map";
 import { ThemeProvider as NextThemesProvider } from "next-themes";
+// Recharts imports removed as charts are no longer used
 
 /// Types
 interface WeatherData {
@@ -46,6 +45,7 @@ interface WeatherData {
     temp_min: number; 
     temp_max: number; 
     humidity: number; 
+    pressure: number;
   };
   weather: [{ main: string; description: string; icon: string }];
   wind: { speed: number; deg: number };
@@ -94,6 +94,180 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
   return date.toLocaleString('en-GB', { ...options, timeZone: 'UTC' });
 };
 
+// Static Animation Configurations
+const bgAnimationStyles = [
+  { initial: { scale: 1.1, filter: 'blur(10px) brightness(0.5)' }, animate: { scale: 1, filter: 'blur(0px) brightness(0.6)' }, transition: { duration: 1.5, ease: "easeOut" } }, // Zoom + Focus
+  { initial: { opacity: 0, x: 20 }, animate: { opacity: 1, x: 0 }, transition: { duration: 1.2, ease: "circOut" } }, // Slide + Fade
+  { initial: { filter: 'saturate(0)' }, animate: { filter: 'saturate(1.1)' }, transition: { duration: 2, ease: "easeInOut" } }, // Color Bleed
+  { initial: { scale: 1.2 }, animate: { scale: 1 }, transition: { duration: 3, ease: "linear" } }, // Slow Zoom
+  { initial: { opacity: 0, filter: 'brightness(2)' }, animate: { opacity: 1, filter: 'brightness(0.6)' }, transition: { duration: 1, ease: "easeIn" } } // Light Leak
+];
+
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.05,
+      delayChildren: 0.1
+    }
+  }
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 20 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: {
+      type: "spring",
+      stiffness: 100,
+      damping: 15
+    }
+  }
+};
+
+// Isolated Clock Component to prevent full-app re-renders
+const ClockDisplay = React.memo(({ timezone, weatherDt }: { timezone: number, weatherDt: number }) => {
+  const [time, setTime] = useState('');
+
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      const cityDate = new Date(now.getTime() + (timezone * 1000) + (now.getTimezoneOffset() * 60000));
+      setTime(cityDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    };
+    
+    updateTime();
+    const timer = setInterval(updateTime, 1000);
+    return () => clearInterval(timer);
+  }, [timezone, weatherDt]);
+
+  return <span className="text-blue-400 font-mono text-[14px]">{time || '--:--:--'}</span>;
+});
+
+// Weather Effects Components
+const WeatherParticles = React.memo(({ type, description, isNight }: { type: string, description: string, isNight: boolean }) => {
+  // Rain / Drizzle Effect
+  if (type.includes('rain') || description.includes('drizzle')) {
+    const particleCount = description.includes('heavy') ? 80 : description.includes('light') ? 30 : 50;
+    return (
+      <div className="absolute inset-0 pointer-events-none z-[3]">
+        {[...Array(particleCount)].map((_, i) => (
+          <motion.div
+            key={i}
+            initial={{ y: -50, x: `${Math.random() * 100}%`, opacity: 0 }}
+            animate={{ 
+              y: "110vh", 
+              opacity: [0, 0.4, 0],
+              x: `${Math.random() * 100 + (Math.sin(i) * 2)}%` 
+            }}
+            transition={{ 
+              duration: 0.8 + Math.random() * 0.5, 
+              repeat: Infinity, 
+              delay: Math.random() * 2, 
+              ease: "linear" 
+            }}
+            className="absolute w-[1px] h-10 bg-blue-400/20 blur-[0.3px]"
+          />
+        ))}
+      </div>
+    );
+  }
+  
+  // Snow Effect
+  if (type.includes('snow')) {
+    const particleCount = 40;
+    return (
+      <div className="absolute inset-0 pointer-events-none z-[3]">
+        {[...Array(particleCount)].map((_, i) => (
+          <motion.div
+            key={i}
+            initial={{ y: -20, x: `${Math.random() * 100}%`, opacity: 0, rotate: 0 }}
+            animate={{ 
+              y: "110vh", 
+              opacity: [0, 0.9, 0],
+              x: `${Math.random() * 100 + (Math.sin(i / 5) * 10)}%`,
+              rotate: [0, 360]
+            }}
+            transition={{ 
+              duration: 6 + Math.random() * 6, 
+              repeat: Infinity, 
+              delay: Math.random() * 5, 
+              ease: "easeInOut" 
+            }}
+            className="absolute w-2.5 h-2.5 bg-white/40 rounded-full blur-[1px]"
+          />
+        ))}
+      </div>
+    );
+  }
+  
+  // Clouds / Overcast Effect
+  if (type.includes('clouds') || type.includes('mist') || type.includes('fog') || type.includes('haze')) {
+    const count = description.includes('scattered') ? 2 : 5;
+    return (
+      <div className="absolute inset-0 pointer-events-none z-[3] overflow-hidden">
+        {[...Array(count)].map((_, i) => (
+          <motion.div
+            key={count + i}
+            initial={{ x: "-100%", y: `${Math.random() * 100}%`, opacity: 0 }}
+            animate={{ x: "200%", opacity: [0, 0.1, 0] }}
+            transition={{ 
+              duration: 150 + Math.random() * 100, 
+              repeat: Infinity, 
+              delay: i * 25, 
+              ease: "linear" 
+            }}
+            className="absolute w-[1200px] h-[600px] bg-white/[0.02] rounded-full blur-[180px]"
+          />
+        ))}
+      </div>
+    );
+  }
+
+  // Clear / Sunny / Night Effect
+  if (type.includes('clear')) {
+    if (isNight) {
+      return (
+        <div className="absolute inset-0 pointer-events-none z-[3]">
+          {[...Array(25)].map((_, i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0 }}
+              animate={{ 
+                opacity: [0, 1, 0],
+                scale: [0.8, 1.1, 0.8]
+              }}
+              transition={{ 
+                duration: 2 + Math.random() * 3, 
+                repeat: Infinity, 
+                delay: Math.random() * 5, 
+                ease: "easeInOut" 
+              }}
+              className="absolute w-1 h-1 bg-white rounded-full shadow-[0_0_8px_white]"
+              style={{ top: `${Math.random() * 100}%`, left: `${Math.random() * 100}%` }}
+            />
+          ))}
+        </div>
+      );
+    } else {
+      return (
+         <div className="absolute inset-0 pointer-events-none z-[3]">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: [0, 0.08, 0] }}
+              transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
+              className="absolute top-[-10%] left-[-10%] w-[120%] h-[120%] bg-gradient-to-tr from-yellow-400/5 to-transparent blur-[120px]"
+            />
+         </div>
+      );
+    }
+  }
+
+  return null;
+});
+
   export default function App() {
     const [city, setCity] = useState('');
     const [weather, setWeather] = useState<WeatherData | null>(null);
@@ -134,7 +308,6 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
     const [bgImage, setBgImage] = useState(DEFAULT_BG);
     const [pollution, setPollution] = useState<PollutionData | null>(null);
     const [uvIndex, setUvIndex] = useState<number | null>(null);
-    const [currentTime, setCurrentTime] = useState<string>('');
     const [alerts, setAlerts] = useState<any[]>([]);
     const [isListening, setIsListening] = useState(false);
     const [isHyperlocal, setIsHyperlocal] = useState(false);
@@ -143,165 +316,91 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [animCycle, setAnimCycle] = useState(0);
 
-    // Animation Styles for the background
-    const bgAnimationStyles = [
-        { initial: { scale: 1.1, filter: 'blur(10px) brightness(0.5)' }, animate: { scale: 1, filter: 'blur(0px) brightness(0.6)' }, transition: { duration: 1.5, ease: "easeOut" } }, // Zoom + Focus
-        { initial: { opacity: 0, x: 20 }, animate: { opacity: 1, x: 0 }, transition: { duration: 1.2, ease: "circOut" } }, // Slide + Fade
-        { initial: { filter: 'saturate(0)' }, animate: { filter: 'saturate(1.1)' }, transition: { duration: 2, ease: "easeInOut" } }, // Color Bleed
-        { initial: { scale: 1.2 }, animate: { scale: 1 }, transition: { duration: 3, ease: "linear" } }, // Slow Zoom
-        { initial: { opacity: 0, filter: 'brightness(2)' }, animate: { opacity: 1, filter: 'brightness(0.6)' }, transition: { duration: 1, ease: "easeIn" } } // Light Leak
-    ];
+    // Favorites
+    const [favorites, setFavorites] = useState<string[]>(() => {
+      const saved = localStorage.getItem('skycast_favorites');
+      return saved ? JSON.parse(saved) : [];
+    });
+    const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
 
-    // Animation Variants
-    const containerVariants = {
-      hidden: { opacity: 0 },
-      visible: {
-        opacity: 1,
-        transition: {
-          staggerChildren: 0.1,
-          delayChildren: 0.2
+    useEffect(() => {
+      localStorage.setItem('skycast_favorites', JSON.stringify(favorites));
+    }, [favorites]);
+
+    const toggleFavorite = (cityName: string) => {
+      setFavorites(prev => {
+        if (prev.includes(cityName)) {
+          return prev.filter(c => c !== cityName);
         }
-      }
+        return [...prev, cityName];
+      });
     };
 
-    const itemVariants = {
-      hidden: { opacity: 0, y: 20 },
-      visible: {
-        opacity: 1,
-        y: 0,
-        transition: {
-          type: "spring",
-          stiffness: 100,
-          damping: 12
-        }
-      }
-    };
-
-    // Weather Effects Components
-    const WeatherParticles = () => {
-      if (!weather) return null;
-      const type = weather.weather[0].main.toLowerCase();
-      const description = weather.weather[0].description.toLowerCase();
+    // Daily Planner Logic
+    const planner = useMemo(() => {
+      if (!forecast) return null;
+      // Get morning (9am), afternoon (3pm), evening (9pm)
+      const morning = forecast.list.find(i => i.dt_txt.includes('09:00:00')) || forecast.list[0];
+      const afternoon = forecast.list.find(i => i.dt_txt.includes('15:00:00')) || forecast.list[2];
+      const evening = forecast.list.find(i => i.dt_txt.includes('21:00:00')) || forecast.list[4];
       
-      // Rain / Drizzle Effect
-      if (type.includes('rain') || description.includes('drizzle')) {
-        const particleCount = description.includes('heavy') ? 100 : description.includes('light') ? 40 : 70;
-        return (
-          <div className="absolute inset-0 pointer-events-none z-[3]">
-            {[...Array(particleCount)].map((_, i) => (
-              <motion.div
-                key={i}
-                initial={{ y: -50, x: Math.random() * 100 + "%", opacity: 0 }}
-                animate={{ 
-                  y: "110vh", 
-                  opacity: [0, 0.4, 0],
-                  x: (Math.random() * 100 + (Math.sin(i) * 2)) + "%" 
-                }}
-                transition={{ 
-                  duration: 0.8 + Math.random() * 0.5, 
-                  repeat: Infinity, 
-                  delay: Math.random() * 2, 
-                  ease: "linear" 
-                }}
-                className="absolute w-[1px] h-10 bg-blue-400/20 blur-[0.3px]"
-              />
-            ))}
-          </div>
-        );
-      }
-      
-      // Snow Effect
-      if (type.includes('snow')) {
-        const particleCount = 50;
-        return (
-          <div className="absolute inset-0 pointer-events-none z-[3]">
-            {[...Array(particleCount)].map((_, i) => (
-              <motion.div
-                key={i}
-                initial={{ y: -20, x: Math.random() * 100 + "%", opacity: 0, rotate: 0 }}
-                animate={{ 
-                  y: "110vh", 
-                  opacity: [0, 0.9, 0],
-                  x: (Math.random() * 100 + (Math.sin(i / 5 + Date.now()/1000) * 10)) + "%",
-                  rotate: [0, 360]
-                }}
-                transition={{ 
-                  duration: 6 + Math.random() * 6, 
-                  repeat: Infinity, 
-                  delay: Math.random() * 5, 
-                  ease: "easeInOut" 
-                }}
-                className="absolute w-2.5 h-2.5 bg-white/40 rounded-full blur-[1px]"
-              />
-            ))}
-          </div>
-        );
-      }
-      
-      // Clouds / Overcast Effect
-      if (type.includes('clouds') || type.includes('mist') || type.includes('fog') || type.includes('haze')) {
-        const count = description.includes('scattered') ? 3 : 8;
-        return (
-          <div className="absolute inset-0 pointer-events-none z-[3] overflow-hidden">
-            {[...Array(count)].map((_, i) => (
-              <motion.div
-                key={i}
-                initial={{ x: "-100%", y: (Math.random() * 100) + "%", opacity: 0 }}
-                animate={{ x: "200%", opacity: [0, 0.15, 0] }}
-                transition={{ 
-                  duration: 120 + Math.random() * 100, 
-                  repeat: Infinity, 
-                  delay: i * 20, 
-                  ease: "linear" 
-                }}
-                className="absolute w-[1200px] h-[600px] bg-white/[0.03] rounded-full blur-[180px]"
-              />
-            ))}
-          </div>
-        );
-      }
+      const getAdvice = (item: any, timeSlot: string) => {
+        const t = item.main.temp;
+        const m = item.weather[0].main.toLowerCase();
+        const isMetric = unit === 'metric';
+        
+        if (m.includes('rain') || m.includes('storm')) return "Better stay indoor or carry an umbrella.";
+        if (isMetric ? t > 30 : t > 86) return "Too hot for intense activities.";
+        if (isMetric ? t < 5 : t < 41) return "Wear warm layers for this slot.";
+        
+        if (timeSlot === 'Morning') return "Great time for a walk or light workout.";
+        if (timeSlot === 'Afternoon') return "Good for errands or outdoor meetings.";
+        return "Perfect for a relaxing stroll.";
+      };
 
-      // Clear / Sunny / Night Effect
-      if (type.includes('clear')) {
-        if (isNight) {
-          return (
-            <div className="absolute inset-0 pointer-events-none z-[3]">
-              {[...Array(30)].map((_, i) => (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0 }}
-                  animate={{ 
-                    opacity: [0, 1, 0],
-                    scale: [0.8, 1.2, 0.8]
-                  }}
-                  transition={{ 
-                    duration: 2 + Math.random() * 3, 
-                    repeat: Infinity, 
-                    delay: Math.random() * 5, 
-                    ease: "easeInOut" 
-                  }}
-                  className="absolute w-1 h-1 bg-white rounded-full shadow-[0_0_8px_white]"
-                  style={{ top: (Math.random() * 100) + "%", left: (Math.random() * 100) + "%" }}
-                />
-              ))}
-            </div>
-          );
-        } else {
-          return (
-             <div className="absolute inset-0 pointer-events-none z-[3]">
-                <motion.div 
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: [0, 0.1, 0] }}
-                  transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
-                  className="absolute top-[-10%] left-[-10%] w-[120%] h-[120%] bg-gradient-to-tr from-yellow-400/5 to-transparent blur-[120px]"
-                />
-             </div>
-          );
-        }
-      }
+      return { 
+        morning: { ...morning, advice: getAdvice(morning, 'Morning') }, 
+        afternoon: { ...afternoon, advice: getAdvice(afternoon, 'Afternoon') }, 
+        evening: { ...evening, advice: getAdvice(evening, 'Evening') } 
+      };
+    }, [forecast, unit]);
 
-      return null;
-    };
+    // Mood / Comfort Indicator
+    const mood = useMemo(() => {
+      if (!weather) return { icon: '😊', label: 'Pleasant' };
+      const t = weather.main.temp;
+      const isMetric = unit === 'metric';
+      if (isMetric ? t > 35 : t > 95) return { icon: '🔥', label: 'Extreme' };
+      if (isMetric ? t > 28 : t > 82) return { icon: '😓', label: 'Uncomfortable' };
+      if (isMetric ? t < 10 : t < 50) return { icon: '🥶', label: 'Bitter' };
+      return { icon: '😊', label: 'Pleasant' };
+    }, [weather, unit]);
+
+    const isEvening = useMemo(() => {
+      if (!weather) return false;
+      const localTime = weather.dt;
+      const sunset = weather.sys.sunset;
+      // Defining evening as 1 hour before and after sunset
+      return localTime >= sunset - 3600 && localTime <= sunset + 3600;
+    }, [weather]);
+
+    const isNight = useMemo(() => {
+      if (!weather) return false;
+      const localHour = new Date((weather.dt + weather.timezone) * 1000).getUTCHours();
+      return localHour >= 19 || localHour <= 6;
+    }, [weather]);
+
+    const sunriseSunsetProgress = useMemo(() => {
+      if (!weather) return 0;
+      const now = weather.dt;
+      const sunrise = weather.sys.sunrise;
+      const sunset = weather.sys.sunset;
+      
+      if (now < sunrise) return 0;
+      if (now > sunset) return 100;
+      
+      return ((now - sunrise) / (sunset - sunrise)) * 100;
+    }, [weather]);
 
     // Debounced search logic
     useEffect(() => {
@@ -332,21 +431,6 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
       };
       recognition.start();
     };
-
-  // Real-time Clock Implementation
-  useEffect(() => {
-    const updateTime = () => {
-      if (weather) {
-        const now = new Date();
-        const cityDate = new Date(now.getTime() + (weather.timezone * 1000) + (now.getTimezoneOffset() * 60000));
-        setCurrentTime(cityDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-      }
-    };
-    
-    updateTime();
-    const timer = setInterval(updateTime, 1000);
-    return () => clearInterval(timer);
-  }, [weather]);
 
   // Initial Fetch & Geolocation
   useEffect(() => {
@@ -443,6 +527,7 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
     fetchBackground(wData.name);
     fetchPollution(wData.coord.lat, wData.coord.lon);
     fetchUV(wData.coord.lat, wData.coord.lon);
+    setLastUpdated(new Date());
   }, [unit, fetchBackground, fetchPollution, fetchUV]);
 
   const fetchWeatherByCoords = React.useCallback(async (lat: number, lon: number) => {
@@ -477,14 +562,23 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
     }
   }, [unit, updateAllData]);
 
-  // Poll AQI data every 5 minutes
+  // Poll AQI data every 5 minutes and auto-refresh all data every 10 minutes
   useEffect(() => {
     if (!weather) return;
-    const interval = setInterval(() => {
+    
+    const aqiInterval = setInterval(() => {
       fetchPollution(weather.coord.lat, weather.coord.lon);
-    }, 300000);
-    return () => clearInterval(interval);
-  }, [weather, fetchPollution]);
+    }, 300000); // 5 mins
+
+    const refreshInterval = setInterval(() => {
+      fetchWeather(weather.name);
+    }, 600000); // 10 mins
+
+    return () => {
+      clearInterval(aqiInterval);
+      clearInterval(refreshInterval);
+    };
+  }, [weather, fetchPollution, fetchWeather]);
 
   // Re-fetch when unit changes
   const lastUnitRef = useRef(unit);
@@ -495,20 +589,6 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
     }
   }, [unit, fetchWeather, weather]);
 
-
-  const isEvening = useMemo(() => {
-    if (!weather) return false;
-    const localTime = weather.dt;
-    const sunset = weather.sys.sunset;
-    // Defining evening as 1 hour before and after sunset
-    return localTime >= sunset - 3600 && localTime <= sunset + 3600;
-  }, [weather]);
-
-  const isNight = useMemo(() => {
-    if (!weather) return false;
-    const localHour = new Date((weather.dt + weather.timezone) * 1000).getUTCHours();
-    return localHour >= 19 || localHour <= 6;
-  }, [weather]);
 
   const dailyForecast = useMemo(() => {
     if (!forecast) return [];
@@ -541,7 +621,7 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
   return (
     // @ts-ignore
     <NextThemesProvider attribute="class" defaultTheme="dark" enableSystem>
-    <div className="relative min-h-screen w-full flex items-center justify-center p-2 sm:p-4 transition-all duration-1000 overflow-hidden bg-brand-bg select-none">
+    <div className="relative min-h-screen w-full flex flex-col items-center transition-all duration-1000 overflow-y-auto overflow-x-hidden bg-brand-bg select-none custom-scrollbar scroll-smooth">
       {/* Dynamic Animated Background with Parallax */}
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
         <AnimatePresence mode="wait">
@@ -672,7 +752,13 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
       </AnimatePresence>
 
       {/* Main Container */}
-      <WeatherParticles />
+      {weather && (
+        <WeatherParticles 
+          type={weather.weather[0].main.toLowerCase()} 
+          description={weather.weather[0].description.toLowerCase()} 
+          isNight={isNight} 
+        />
+      )}
       <AnimatePresence mode="wait">
         <motion.main 
           key={weather?.name || 'loading'}
@@ -680,10 +766,36 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
           animate="visible"
           exit="hidden"
           variants={containerVariants}
-          className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 pt-24 sm:pt-32 pb-32 sm:pb-40 flex flex-col lg:flex-row gap-6 sm:gap-10 items-stretch"
+          className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-12 flex flex-col items-stretch gap-6 min-h-screen"
         >
-          {/* Left Column: Primary Weather & Detail Grid */}
-          <div className="flex-1 flex flex-col gap-6 no-scrollbar lg:max-h-[90vh] lg:overflow-y-auto">
+          {/* Top Level Critical Alerts */}
+          {alerts.length > 0 && (
+            <motion.div variants={itemVariants} className="w-full flex flex-col gap-2 px-3 sm:px-0">
+              {alerts.map((alert: any, idx: number) => (
+                <motion.div 
+                  key={idx} 
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="bg-rose-500/20 backdrop-blur-xl border border-rose-500/30 p-4 rounded-2xl flex gap-4 items-center shadow-lg"
+                >
+                  <div className="w-10 h-10 rounded-full bg-rose-500/20 flex items-center justify-center text-rose-400">
+                    <AlertCircle size={20} />
+                  </div>
+                  <div className="flex flex-col flex-1">
+                    <span className="text-[11px] font-black text-rose-300 uppercase tracking-widest">{alert.event}</span>
+                    <p className="text-sm text-white/90 font-medium">{alert.description}</p>
+                  </div>
+                  <button onClick={() => setAlerts(prev => prev.filter((_, i) => i !== idx))} className="text-white/40 hover:text-white transition-colors">
+                    <X size={16} />
+                  </button>
+                </motion.div>
+              ))}
+            </motion.div>
+          )}
+
+          <div className="flex flex-col lg:flex-row gap-4 sm:gap-8 items-stretch px-3 sm:px-0">
+            {/* Left Column: Primary Weather & Detail Grid */}
+            <div className="flex-1 flex flex-col gap-4 sm:gap-6 no-scrollbar">
             
             {/* Header: Navigation Style */}
             <motion.nav variants={itemVariants} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 z-10 mb-2 sm:mb-4">
@@ -712,60 +824,95 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
                         {isHyperlocal && <span className="text-blue-400 mr-1">[GPS]</span>}
                         {weather ? `${weather.name}, ${weather.sys.country}` : 'Scanning...'}
                       </span>
+                      {weather && (
+                        <motion.button 
+                          whileHover={{ scale: 1.2 }}
+                          whileTap={{ scale: 0.9 }}
+                          onClick={(e) => { e.stopPropagation(); toggleFavorite(weather.name); }}
+                          className={`ml-1 transition-colors ${favorites.includes(weather.name) ? 'text-amber-400' : 'text-white/20 hover:text-white/40'}`}
+                        >
+                          <Zap size={10} fill={favorites.includes(weather.name) ? "currentColor" : "none"} />
+                        </motion.button>
+                      )}
                     </div>
                     {weather && (
                       <span className="text-[9px] text-white/40 font-medium gap-1 flex items-center">
                         <MapPin size={8} /> {weather.coord.lat.toFixed(4)}, {weather.coord.lon.toFixed(4)}
+                        <span className="mx-1">•</span>
+                        <span title="Local Mood">{mood.icon} {mood.label}</span>
+                        <span className="mx-1">•</span>
+                        <span title="Last Refresh" className="flex items-center gap-1">
+                          <Activity size={8} /> 
+                          {lastUpdated.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
                       </span>
                     )}
                   </div>
                 </motion.div>
                 <div className="text-[10px] sm:text-xs text-white/40 font-bold tracking-widest uppercase flex flex-col items-end">
                   <span>{weather ? formatLocalTime(weather.dt, weather.timezone, { weekday: 'long', day: 'numeric', month: 'long' }) : '...'}</span>
-                  <span className="text-blue-400 font-mono text-[14px]">{currentTime || '--:--:--'}</span>
+                  <ClockDisplay timezone={weather?.timezone || 0} weatherDt={weather?.dt || 0} />
                 </div>
               </div>
             </motion.nav>
 
             {/* Search Bar - Integrated with Unit Toggle */}
-              <motion.div variants={itemVariants} className="flex items-center gap-2 sm:gap-3 mb-2">
-              <div className="relative group flex-1">
-                <form 
-                  onSubmit={(e) => { e.preventDefault(); if(city) fetchWeather(city); }}
-                >
-                  <ShineBorder 
-                    isFocused={isSearchFocused}
-                    color={["#60a5fa", "#3b82f6", "#2563eb"]}
-                    className="rounded-2xl w-full"
+              <motion.div variants={itemVariants} className="flex flex-col gap-3 mb-2">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="relative group flex-1">
+                  <form 
+                    onSubmit={(e) => { e.preventDefault(); if(city) fetchWeather(city); }}
                   >
-                    <input 
-                      type="text" 
-                      value={city}
-                      onChange={(e) => setCity(e.target.value)}
-                      onFocus={() => setIsSearchFocused(true)}
-                      onBlur={() => setIsSearchFocused(false)}
-                      placeholder="Search city..."
-                      className="w-full bg-black/40 border border-white/10 rounded-2xl py-3 sm:py-4 px-6 pl-10 sm:pl-12 pr-12 focus:outline-none transition-all placeholder:text-white/40 text-white text-sm backdrop-blur-xl"
-                    />
-                  </ShineBorder>
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none z-20" size={16} />
-                  {loading && <Loader2 className="absolute right-12 top-1/2 -translate-y-1/2 text-blue-400 animate-spin z-20" size={18} />}
-                </form>
+                    <ShineBorder 
+                      isFocused={isSearchFocused}
+                      color={["#60a5fa", "#3b82f6", "#2563eb"]}
+                      className="rounded-2xl w-full"
+                    >
+                      <input 
+                        type="text" 
+                        value={city}
+                        onChange={(e) => setCity(e.target.value)}
+                        onFocus={() => setIsSearchFocused(true)}
+                        onBlur={() => setIsSearchFocused(false)}
+                        placeholder="Search city..."
+                        className="w-full bg-black/40 border border-white/10 rounded-2xl py-3 sm:py-4 px-6 pl-10 sm:pl-12 pr-12 focus:outline-none transition-all placeholder:text-white/40 text-white text-sm backdrop-blur-xl"
+                      />
+                    </ShineBorder>
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none z-20" size={16} />
+                    {loading && <Loader2 className="absolute right-12 top-1/2 -translate-y-1/2 text-blue-400 animate-spin z-20" size={18} />}
+                  </form>
+                  <button 
+                    onClick={startVoiceSearch}
+                    className={`absolute right-4 top-1/2 -translate-y-1/2 transition-all p-1 rounded-full z-20 ${isListening ? 'bg-rose-500/20 text-rose-400 scale-110' : 'text-white/40 hover:text-blue-400'}`}
+                    title="Voice Search"
+                  >
+                    {isListening ? <MicOff size={16} /> : <Mic size={16} />}
+                  </button>
+                </div>
                 <button 
-                  onClick={startVoiceSearch}
-                  className={`absolute right-4 top-1/2 -translate-y-1/2 transition-all p-1 rounded-full z-20 ${isListening ? 'bg-rose-500/20 text-rose-400 scale-110' : 'text-white/40 hover:text-blue-400'}`}
-                  title="Voice Search"
+                  onClick={() => setUnit(unit === 'metric' ? 'imperial' : 'metric')}
+                  className={`glass-card p-3 rounded-2xl transition-all font-black text-[10px] w-12 h-[52px] flex items-center justify-center border-2 ${unit === 'metric' ? 'border-blue-500/20 text-blue-400' : 'border-orange-500/20 text-orange-400'}`}
+                  title="Toggle System Units"
                 >
-                  {isListening ? <MicOff size={16} /> : <Mic size={16} />}
+                  {unit === 'metric' ? '°C' : '°F'}
                 </button>
               </div>
-              <button 
-                onClick={() => setUnit(unit === 'metric' ? 'imperial' : 'metric')}
-                className={`glass-card p-3 rounded-2xl transition-all font-black text-[10px] w-12 h-[52px] flex items-center justify-center border-2 ${unit === 'metric' ? 'border-blue-500/20 text-blue-400' : 'border-orange-500/20 text-orange-400'}`}
-                title="Toggle System Units"
-              >
-                {unit === 'metric' ? '°C' : '°F'}
-              </button>
+
+              {/* Favorites Quick Links */}
+              {favorites.length > 0 && (
+                <div className="flex flex-wrap gap-2 px-2">
+                  {favorites.map(fav => (
+                    <button 
+                      key={fav}
+                      onClick={() => fetchWeather(fav)}
+                      className="flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 border border-amber-500/20 rounded-full text-[10px] font-bold text-amber-400 hover:bg-amber-500/20 transition-all"
+                    >
+                      <Zap size={10} fill="currentColor" />
+                      {fav}
+                    </button>
+                  ))}
+                </div>
+              )}
             </motion.div>
 
             {/* Error Message with Retry */}
@@ -893,6 +1040,7 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
                       alt="Condition"
                       className="w-full h-full object-contain filter drop-shadow-[0_0_30px_rgba(255,255,255,0.2)]"
                       loading="lazy"
+                      referrerPolicy="no-referrer"
                     />
                   </motion.div>
                 </div>
@@ -900,79 +1048,97 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
             </motion.div>
           )}
 
-            {/* Hourly Forecast Row */}
+            {/* Atmospheric Timeline - High Fidelity to Reference Image */}
             {hourlyForecast.length > 0 && weather && (
-              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-6 gap-3 sm:gap-4 scroll-mt-20">
-                {hourlyForecast.slice(0, 6).map((item, idx) => (
-                  <motion.div 
-                    key={item.dt}
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    whileHover={{ 
-                      scale: 1.05, 
-                      y: -5, 
-                      backgroundColor: "rgba(59, 130, 246, 0.15)",
-                      boxShadow: "0 0 20px rgba(59, 130, 246, 0.3)"
-                    }}
-                    transition={{ 
-                      type: "spring", 
-                      stiffness: 400, 
-                      damping: 17,
-                      delay: idx * 0.05 
-                    }}
-                    className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl transition-all cursor-pointer ${idx === 0 ? 'glass-card-active' : 'glass-card'}`}
-                  >
-                    <span className={`text-[10px] ${idx === 0 ? 'text-blue-300 font-bold uppercase' : 'text-white/40'}`}>
-                      {idx === 0 ? 'Now' : formatLocalTime(item.dt, weather.timezone, { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                    <span className="text-lg font-bold">{Math.round(item.main.temp)}°</span>
-                    <div className={`w-2 h-2 rounded-full ${idx === 0 ? 'bg-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.8)]' : 'bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.5)]'}`}></div>
-                  </motion.div>
-                ))}
-              </div>
+              <motion.div variants={itemVariants} className="relative mt-2">
+                <div className="flex justify-between items-baseline mb-6 px-1">
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-blue-400">Atmospheric Timeline</h3>
+                  <div className="text-[8px] text-white/10 font-black uppercase tracking-[0.5em]">Future Pulse</div>
+                </div>
+                <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-6 gap-2 sm:gap-4">
+                  {hourlyForecast.slice(0, 6).map((item, idx) => (
+                    <motion.div 
+                      key={item.dt}
+                      whileHover={{ scale: 1.05, y: -4 }}
+                      transition={{ type: "spring", stiffness: 400, damping: 20 }}
+                      className={`flex flex-col items-center justify-center gap-4 p-6 sm:p-7 rounded-[28px] transition-all relative overflow-hidden backdrop-blur-xl ${
+                        idx === 0 
+                        ? 'bg-[#1e293b]/90 border-[1.5px] border-blue-500/40 shadow-[0_0_40px_rgba(59,130,246,0.12)]' 
+                        : 'bg-[#111827]/40 border border-white/5 shadow-inner'
+                      }`}
+                    >
+                      <span className={`text-[10px] font-black uppercase tracking-widest ${idx === 0 ? 'text-blue-400' : 'text-white/20'}`}>
+                        {idx === 0 ? 'Now' : formatLocalTime(item.dt, weather.timezone, { hour: '2-digit', minute: '2-digit' }).replace(' ', '')}
+                      </span>
+                      <span className="text-3xl font-black tracking-tighter text-white drop-shadow-sm">
+                        {Math.round(item.main.temp)}°
+                      </span>
+                      <div className={`w-2 h-2 rounded-full ring-2 ring-transparent ${
+                        idx === 0 
+                        ? 'bg-yellow-400 shadow-[0_0_12px_rgba(250,204,21,1)]' 
+                        : 'bg-[#3b82f6] shadow-[0_0_12px_rgba(59,130,246,0.8)]'
+                      }`}></div>
+                    </motion.div>
+                  ))}
+                </div>
+              </motion.div>
             )}
           </div>
 
-          {/* Right Column: Outlook */}
-          <div className="lg:w-80 flex flex-col gap-6 no-scrollbar lg:max-h-[90vh] lg:overflow-y-auto">
+          {/* Right Column: Outlook & Details */}
+          <div className="lg:w-80 flex flex-col gap-4 sm:gap-6 no-scrollbar">
             
-            {/* Weather Alerts if any */}
-            {alerts.length > 0 && (
-              <motion.div variants={itemVariants} className="flex flex-col gap-2">
-                {alerts.map((alert: any, idx: number) => (
-                  <div key={idx} className="bg-rose-500/10 border border-rose-500/20 p-4 rounded-2xl flex gap-3 items-center">
-                    <AlertCircle className="text-rose-400" size={18} />
-                    <div className="flex flex-col">
-                      <span className="text-[10px] font-bold text-rose-300 uppercase">{alert.event}</span>
-                      <p className="text-[11px] text-white/70 line-clamp-2">{alert.description}</p>
-                    </div>
+            {/* Daily Planner Section */}
+            {planner && (
+              <motion.div variants={itemVariants}>
+                <GlowCard 
+                  glowColor="cyan"
+                  customSize
+                  className="rounded-[24px] p-5 flex flex-col gap-3 shadow-xl"
+                >
+                  <h3 className="text-[9px] font-bold uppercase tracking-widest text-cyan-400 flex items-center justify-between">
+                    <div className="flex items-center gap-2"><Calendar size={12} /> Daily Planner</div>
+                  </h3>
+                  <div className="space-y-3">
+                    {[
+                      { label: 'Morning', icon: <Sunrise size={14} />, data: planner.morning },
+                      { label: 'Afternoon', icon: <Navigation size={14} className="rotate-90" />, data: planner.afternoon },
+                      { label: 'Evening', icon: <Sunset size={14} />, data: planner.evening }
+                    ].map((item, idx) => (
+                      <div key={idx} className="flex items-center gap-3 bg-white/2 p-2.5 rounded-xl border border-white/5 hover:bg-white/5 transition-all">
+                        <div className="text-cyan-400 shrink-0">{item.icon}</div>
+                        <div className="flex flex-col flex-1 min-w-0">
+                          <div className="flex justify-between items-center mb-0.5">
+                            <span className="text-[9px] font-black text-white/40 uppercase">{item.label}</span>
+                            <span className="text-xs font-black text-white">{Math.round(item.data.main.temp)}°</span>
+                          </div>
+                          <p className="text-[10px] text-white/60 leading-tight font-medium line-clamp-1">{(item.data as any).advice}</p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                </GlowCard>
               </motion.div>
             )}
-
-            {/* 5-Day Forecast List */}
+            {/* Weekly Forecast List */}
             <motion.div variants={itemVariants}>
               <GlowCard 
                 glowColor="orange"
                 customSize
-                className="rounded-[32px] p-6 flex flex-col gap-4 shadow-xl"
+                className="rounded-[24px] p-5 flex flex-col gap-3 shadow-xl bg-white/[0.01]"
               >
-                <h3 className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-2 flex items-center justify-between">
+                <h3 className="text-[9px] font-bold uppercase tracking-widest text-white/40 flex items-center justify-between">
                   <span>5-Day Outlook</span>
-                  <span className="text-blue-400/50 flex items-center gap-1"><Clock size={10} /> 12:00 Local</span>
+                  <span className="text-blue-400/50 flex items-center gap-1 font-black"><Calendar size={10} /> 12:00</span>
                 </h3>
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-1">
                   {dailyForecast.map((item, idx) => (
                     <motion.div 
                       key={item.dt} 
-                      initial={{ opacity: 0, x: 10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      whileHover={{ x: 5, backgroundColor: "rgba(255,255,255,0.05)" }}
-                      transition={{ delay: 0.5 + (idx * 0.1) }}
-                      className={`flex justify-between items-center py-2.5 px-2 rounded-xl transition-colors ${idx < dailyForecast.length - 1 ? 'border-b border-white/5' : ''}`}
+                      whileHover={{ x: 5, backgroundColor: "rgba(255,255,255,0.03)" }}
+                      className={`flex justify-between items-center py-2 px-2 rounded-xl transition-colors ${idx < dailyForecast.length - 1 ? 'border-b border-white/5' : ''}`}
                     >
-                      <span className="w-12 text-sm font-medium text-white/60">
+                      <span className="w-12 text-[11px] font-black text-white/60 uppercase">
                         {weather ? formatLocalTime(item.dt, weather.timezone, { weekday: 'short' }) : '...'}
                       </span>
                       <img 
@@ -980,9 +1146,8 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
                         className="w-8 h-8 filter drop-shadow-md" 
                         alt=""
                       />
-                      <div className="flex gap-3 text-sm min-w-[60px] justify-end">
-                        <span className="font-bold text-white">{Math.round(item.main.temp)}°</span>
-                        <span className="text-white/30 font-medium">L</span>
+                      <div className="flex gap-3 text-xs min-w-[60px] justify-end">
+                        <span className="font-black text-white">{Math.round(item.main.temp)}°</span>
                       </div>
                     </motion.div>
                   ))}
@@ -1046,8 +1211,15 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
                   icon={<Eye size={14} className="text-purple-400" />}
                 />
                 <MetricCard 
-                  label="Air Index (AQI)" 
-                  value={pollution ? pollution.list[0].main.aqi.toString() : '--'} 
+                  label="Pressure" 
+                  value={`${weather.main.pressure} hPa`} 
+                  progress={Math.min(((weather.main.pressure - 900) / 200) * 100, 100)}
+                  color="bg-emerald-400"
+                  icon={<Activity size={14} className="text-emerald-400" />}
+                />
+                <MetricCard 
+                  label="Air Quality" 
+                  value={pollution ? ['Good', 'Fair', 'Mod', 'Poor', 'Haz'][pollution.list[0].main.aqi - 1] : '--'} 
                   progress={pollution ? (pollution.list[0].main.aqi / 5) * 100 : 0}
                   color={pollution && pollution.list[0].main.aqi <= 2 ? "bg-emerald-400" : "bg-amber-400"}
                   icon={<Activity size={14} className={pollution && pollution.list[0].main.aqi <= 2 ? "text-emerald-400" : "text-amber-400"} />}
@@ -1061,34 +1233,59 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
                 />
               </motion.div>
             )}
-
-            {/* Sun Cycle Details */}
-            {weather && (
-              <motion.div variants={itemVariants} className="flex justify-between items-center bg-white/5 border border-white/10 rounded-[24px] p-4 gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-orange-500/10 rounded-xl text-orange-300"><Sunrise size={18} /></div>
-                  <div className="flex flex-col">
-                    <span className="text-[9px] uppercase tracking-widest text-white/40 font-bold">Sunrise</span>
-                    <span className="text-xs font-bold">{weather ? formatLocalTime(weather.sys.sunrise, weather.timezone) : '--:--'}</span>
-                  </div>
-                </div>
-                <div className="w-px h-8 bg-white/10" />
-                <div className="flex items-center gap-3 text-right">
-                  <div className="flex flex-col">
-                    <span className="text-[9px] uppercase tracking-widest text-white/40 font-bold">Sunset</span>
-                    <span className="text-xs font-bold">{weather ? formatLocalTime(weather.sys.sunset, weather.timezone) : '--:--'}</span>
-                  </div>
-                  <div className="p-2 bg-purple-500/10 rounded-xl text-purple-300"><Sunset size={18} /></div>
-                </div>
-              </motion.div>
-            )}
           </div>
-        </motion.main>
+        </div>
+
+        {/* Sun Cycle Details - Full Width Footer Section */}
+        {weather && (
+          <motion.div variants={itemVariants} className="mt-4 w-full">
+            <GlowCard glowColor="amber" customSize className="p-5 sm:p-8 rounded-[32px] bg-white/[0.02] border border-white/5 relative overflow-hidden shadow-2xl flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div className="absolute -bottom-10 -right-10 p-2 opacity-5 pointer-events-none">
+                <Sun size={160} className="text-orange-400" />
+              </div>
+              
+              <div className="flex flex-col gap-2 z-10">
+                <div className="flex items-center gap-2">
+                  <Sunrise size={16} className="text-orange-400" />
+                  <h3 className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">Solar Cycle Analytics</h3>
+                </div>
+                <p className="text-[11px] font-bold text-white/60 max-w-xs leading-relaxed">
+                  Tracking celestial transitions for {weather.name}. {isNight ? "Currently in nocturnal phase." : "Currently in diurnal phase."}
+                </p>
+              </div>
+
+              <div className="flex-1 max-w-2xl px-2 z-10">
+                <div className="relative h-2 w-full bg-white/5 rounded-full overflow-hidden mb-3">
+                  <motion.div 
+                    initial={{ width: 0 }}
+                    animate={{ width: `${sunriseSunsetProgress}%` }}
+                    transition={{ duration: 1.5, ease: "easeOut" }}
+                    className="absolute h-full bg-gradient-to-r from-orange-500 via-yellow-400 to-indigo-500 rounded-full shadow-[0_0_20px_rgba(245,158,11,0.5)]"
+                  />
+                </div>
+                <div className="flex justify-between">
+                  <div className="flex flex-col">
+                    <span className="text-[9px] font-black text-white/20 uppercase tracking-widest mb-1">Sunrise</span>
+                    <span className="text-sm font-black text-white">{formatLocalTime(weather.sys.sunrise, weather.timezone)}</span>
+                  </div>
+                  <div className="flex flex-col items-end text-right">
+                    <span className="text-[9px] font-black text-white/20 uppercase tracking-widest mb-1">Sunset</span>
+                    <span className="text-sm font-black text-white">{formatLocalTime(weather.sys.sunset, weather.timezone)}</span>
+                  </div>
+                </div>
+              </div>
+            </GlowCard>
+          </motion.div>
+        )}
+
+        {/* Spacing filler for footer */}
+        <div className="flex-grow"></div>
+      </motion.main>
       </AnimatePresence>
 
       {/* Subtle Footer */}
       <footer className="absolute bottom-6 left-0 right-0 z-20 flex justify-between items-center px-10 text-[9px] text-white/30 tracking-widest uppercase pointer-events-none">
-        <div>Atmosphere Weather System</div>
+        <div>SkyCast Pro System</div>
         <div className="flex gap-6 pointer-events-auto">
           <span className="hover:text-white/60 transition-colors cursor-help">OpenWeatherMap</span>
           <span className="hover:text-white/60 transition-colors cursor-help">Pixabay Engine</span>
@@ -1099,35 +1296,34 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
   );
 }
 
-function MetricCard({ label, value, progress, color, icon, extra }: { label: string, value: string, progress: number, color: string, icon: React.ReactNode, extra?: React.ReactNode }) {
+const MetricCard = React.memo(({ label, value, progress, color, icon, extra }: { label: string, value: string, progress: number, color: string, icon: React.ReactNode, extra?: React.ReactNode }) => {
   return (
     <motion.div
-      whileHover={{ y: -5, scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
-      transition={{ type: "spring", stiffness: 400, damping: 17 }}
+      whileHover={{ y: -3, scale: 1.01 }}
+      className="h-full"
     >
       <GlowCard 
         glowColor="blue"
         customSize
-        className="rounded-[24px] p-5 flex flex-col gap-2 transition-all cursor-pointer group shadow-lg hover:shadow-xl duration-300 h-full"
+        className="rounded-[20px] p-3 sm:p-4 flex flex-col gap-1.5 transition-all cursor-crosshair group shadow-md hover:shadow-lg duration-300 h-full border border-white/5 bg-white/[0.01]"
       >
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-[9px] uppercase tracking-widest text-white/60 font-bold">{label}</span>
-          {icon}
+        <div className="flex items-center justify-between">
+          <span className="text-[8px] uppercase tracking-widest text-white/40 font-black">{label}</span>
+          <div className="opacity-60 group-hover:opacity-100 transition-opacity">{icon}</div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="text-lg sm:text-xl font-bold text-white">{value}</div>
+        <div className="flex items-baseline gap-2">
+          <div className="text-base sm:text-lg font-black text-white tracking-tighter">{value}</div>
           {extra}
         </div>
-        <div className="w-full bg-white/10 h-1 rounded-full overflow-hidden mt-1">
+        <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden mt-0.5">
           <motion.div 
             initial={{ width: 0 }}
             animate={{ width: `${progress}%` }}
-            transition={{ duration: 1, ease: "easeOut", delay: 0.2 }}
-            className={`${color} h-full rounded-full shadow-[0_0_8px_rgba(255,255,255,0.3)]`}
+            transition={{ duration: 1.2, ease: "circOut", delay: 0.2 }}
+            className={`${color} h-full rounded-full opacity-80`}
           />
         </div>
       </GlowCard>
     </motion.div>
   );
-}
+});

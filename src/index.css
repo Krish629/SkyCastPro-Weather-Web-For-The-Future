@@ -9,7 +9,7 @@
 
 @layer base {
   body {
-    @apply bg-brand-bg text-white antialiased overflow-x-hidden selection:bg-blue-500/30;
+    @apply bg-brand-bg text-white antialiased overflow-x-hidden selection:bg-blue-500/30 scroll-smooth;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
@@ -55,4 +55,32 @@
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.mask-linear-right {
+  mask-image: linear-gradient(to right, black 85%, transparent 100%);
+}
+
+.mask-linear-bottom {
+  mask-image: linear-gradient(to bottom, black 90%, transparent 100%);
 }

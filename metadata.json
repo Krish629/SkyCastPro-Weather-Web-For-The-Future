@@ -1,6 +1,6 @@
 {
-  "name": "Atmosphere AI: Smart Weather Intelligence",
-  "description": "A high-performance weather dashboard with AI-driven atmospheric insights and dynamic, context-aware glassmorphic UI.",
+  "name": "SkyCast Pro: Modern Weather System",
+  "description": "A high-performance weather dashboard with smart atmospheric insights and dynamic, context-aware glassmorphic UI.",
   "requestFramePermissions": [
     "geolocation"
   ],
