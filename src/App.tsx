@@ -454,13 +454,16 @@ const WeatherParticles = React.memo(({ type, description, isNight }: { type: str
       return;
     }
 
+    // Advanced search terms for better accuracy
     const timeKeyword = isNight ? 'night' : isEvening ? 'sunset' : 'day';
     const cleanCity = cityName.trim();
+    
+    // Prioritize city landmarks then broader terms
     const queries = [
-      `${cleanCity} ${timeKeyword} skyline`,
-      `${cleanCity} ${timeKeyword}`,
-      cleanCity,
+      `${cleanCity} skyline ${timeKeyword}`,
+      `${cleanCity} city ${timeKeyword}`,
       `${cleanCity} landmark`,
+      `${cleanCity}`,
       `weather ${timeKeyword} landscape`
     ];
 
@@ -471,8 +474,8 @@ const WeatherParticles = React.memo(({ type, description, isNight }: { type: str
         const data = await apiFetch(`/api/images?q=${encodeURIComponent(q)}`);
         
         if (data && data.hits && data.hits.length > 0) {
-          // Select from top 8 results for more variety
-          const topHits = data.hits.slice(0, 8);
+          // Select from top 5 results for quality consistency
+          const topHits = data.hits.slice(0, 5);
           const randomIndex = Math.floor(Math.random() * topHits.length);
           const imageUrl = topHits[randomIndex].largeImageURL || topHits[randomIndex].webformatURL;
           
@@ -488,7 +491,7 @@ const WeatherParticles = React.memo(({ type, description, isNight }: { type: str
     
     // If all else fails
     setBgImage(DEFAULT_BG);
-  }, [apiFetch]);
+  }, [apiFetch, isNight, isEvening]);
 
   const fetchPollution = React.useCallback(async (lat: number, lon: number) => {
     try {
@@ -1055,7 +1058,7 @@ const WeatherParticles = React.memo(({ type, description, isNight }: { type: str
                   <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-blue-400">Atmospheric Timeline</h3>
                   <div className="text-[8px] text-white/10 font-black uppercase tracking-[0.5em]">Future Pulse</div>
                 </div>
-                <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-6 gap-2 sm:gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 sm:gap-4">
                   {hourlyForecast.slice(0, 6).map((item, idx) => (
                     <motion.div 
                       key={item.dt}

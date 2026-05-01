@@ -11,8 +11,10 @@ export default async function handler(req: any, res: any) {
     const query = new URLSearchParams({ 
       key: apiKey, 
       q: String(q), 
-      image_type: 'photo', 
-      category: 'places' 
+      image_type: 'photo',
+      orientation: 'horizontal',
+      safesearch: 'true',
+      per_page: '20'
     }).toString();
     const url = `https://pixabay.com/api/?${query}`;
     
