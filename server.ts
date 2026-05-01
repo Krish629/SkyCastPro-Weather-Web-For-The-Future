@@ -5,10 +5,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import dns from 'dns';
+
+// Fix for potential DNS issues in some environments
+dns.setDefaultResultOrder('ipv4first');
 
 dotenv.config();
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Simple in-memory cache
 const cache = new Map();
@@ -30,21 +32,30 @@ app.use(express.json());
 
 const sanitizeKey = (key: string | undefined): string | null => {
   if (!key) return null;
-  // Deep clean: remove all whitespace and leading/trailing quotes (single or double)
-  const sanitized = key.trim().replace(/^["']|["']$/g, '').trim();
+  // Remove all quotes (single, double, backticks) and trim whitespace
+  const sanitized = key.trim().replace(/['"`]/g, '').trim();
   
   const placeholders = [
     'YOUR_GEMINI_API_KEY',
     'YOUR_OPENWEATHER_API_KEY',
     'YOUR_PIXABAY_API_KEY',
     'ADD_YOUR_KEY_HERE',
-    ''
+    'REPLACE_ME'
   ];
   
-  return (sanitized && !placeholders.includes(sanitized)) ? sanitized : null;
+  if (sanitized && (placeholders.includes(sanitized) || sanitized.length < 8)) {
+    console.warn(`Key "${sanitized.substring(0, 4)}..." seems to be a placeholder or too short.`);
+    return null;
+  }
+  
+  return sanitized || null;
 };
 
 // API Proxy Routes
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', environment: process.env.NODE_ENV });
+});
+
 app.get('/api/weather', async (req, res) => {
   const { city, lat, lon, units = 'metric' } = req.query;
   const apiKey = sanitizeKey(process.env.OPENWEATHER_API_KEY);
@@ -62,6 +73,7 @@ app.get('/api/weather', async (req, res) => {
     const data = await getCached(`https://api.openweathermap.org/data/2.5/weather`, params);
     res.json(data);
   } catch (error: any) {
+    console.error('Weather API Error:', error.response?.data || error.message);
     res.status(error.response?.status || 500).json(error.response?.data || { message: 'Internal Server Error' });
   }
 });
@@ -175,15 +187,17 @@ export default app;
 async function startServer() {
   const PORT = 3000;
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== 'production') {
+  // Vite middleware for development (Skip this on Vercel/Production)
+  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(__dirname, 'dist');
+  } else if (!process.env.VERCEL) {
+    // Basic static serving ONLY for local production testing
+    // Vercel routes are handled by vercel.json
+    const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
