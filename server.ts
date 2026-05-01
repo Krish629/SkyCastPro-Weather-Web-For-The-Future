@@ -4,7 +4,6 @@ import axios from 'axios';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import dns from 'dns';
 
 // Fix for potential DNS issues in some environments
@@ -40,15 +39,19 @@ const sanitizeKey = (key: string | undefined): string | null => {
     'YOUR_OPENWEATHER_API_KEY',
     'YOUR_PIXABAY_API_KEY',
     'ADD_YOUR_KEY_HERE',
-    'REPLACE_ME'
+    'REPLACE_ME',
+    'undefined',
+    'null'
   ];
   
-  if (sanitized && (placeholders.includes(sanitized) || sanitized.length < 8)) {
-    console.warn(`Key "${sanitized.substring(0, 4)}..." seems to be a placeholder or too short.`);
+  if (!sanitized || placeholders.some(p => sanitized.toLowerCase() === p.toLowerCase()) || sanitized.length < 10) {
+    if (sanitized) {
+      console.warn(`Key "${sanitized.substring(0, 4)}..." seems to be a placeholder or invalid.`);
+    }
     return null;
   }
   
-  return sanitized || null;
+  return sanitized;
 };
 
 // API Proxy Routes
@@ -123,6 +126,7 @@ app.get('/api/uv', async (req, res) => {
   }
 });
 
+// Image Proxy Route
 app.get('/api/images', async (req, res) => {
   const { q } = req.query;
   const apiKey = sanitizeKey(process.env.PIXABAY_API_KEY);
@@ -134,50 +138,6 @@ app.get('/api/images', async (req, res) => {
     res.json(data);
   } catch (error: any) {
     res.status(error.response?.status || 500).json(error.response?.data || { message: 'Internal Server Error' });
-  }
-});
-
-app.post('/api/ai-insight', async (req, res) => {
-  const { prompt } = req.body;
-  const apiKey = sanitizeKey(process.env.GEMINI_API_KEY);
-  if (!apiKey) {
-    return res.status(500).json({ message: 'GEMINI_API_KEY is not configured on the server. Please add it to your environment variables in Settings.' });
-  }
-  
-  try {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    const result = await model.generateContent(prompt);
-    res.json({ text: result.response.text() });
-  } catch (error: any) {
-    console.error('Gemini API Insight Error:', error.message || error);
-    const isInvalidKey = error.message?.includes('API key not valid') || error.message?.includes('API_KEY_INVALID');
-    res.status(isInvalidKey ? 401 : 500).json({ 
-      message: isInvalidKey ? 'The provided GEMINI_API_KEY is invalid. Please check your Gemini API key in settings.' : 'Failed to generate AI insight',
-      details: error.message || 'Unknown error'
-    });
-  }
-});
-
-app.post('/api/ai-chat', async (req, res) => {
-  const { prompt } = req.body;
-  const apiKey = sanitizeKey(process.env.GEMINI_API_KEY);
-  if (!apiKey) {
-    return res.status(500).json({ message: 'GEMINI_API_KEY is not configured on the server.' });
-  }
-  
-  try {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    const result = await model.generateContent(prompt);
-    res.json({ text: result.response.text() });
-  } catch (error: any) {
-    console.error('Gemini Chat Error:', error.message || error);
-    const isInvalidKey = error.message?.includes('API key not valid') || error.message?.includes('API_KEY_INVALID');
-    res.status(isInvalidKey ? 401 : 500).json({ 
-      message: isInvalidKey ? 'The provided GEMINI_API_KEY is invalid. Please check your settings.' : 'Failed to generate AI response',
-      details: error.message || 'Unknown error'
-    });
   }
 });
 

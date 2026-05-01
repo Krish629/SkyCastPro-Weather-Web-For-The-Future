@@ -43,6 +43,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { GlowCard } from "@/components/ui/spotlight-card";
 import { ShineBorder } from "@/components/ui/shine-border";
+import { GoogleGenAI } from "@google/genai";
 
 import { Map, MapControls, MapMarker, MarkerContent, MarkerTooltip, MarkerPopup, MarkerLabel, useMap } from "@/components/ui/map";
 import { ThemeProvider as NextThemesProvider } from "next-themes";
@@ -125,7 +126,7 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
     // Protected Error Setter
     const setSafeError = React.useCallback((msg: string | null) => {
       // Allow invalid API key messages to pass through so users can fix their settings
-      if (msg && (msg.includes('GEMINI_API_KEY') || msg.includes('API key not valid'))) {
+      if (msg && (msg.toLowerCase().includes('key') || msg.includes('GEMINI_API_KEY') || msg.toLowerCase().includes('api settings'))) {
         setError(msg);
         return;
       }
@@ -465,6 +466,13 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
     });
   }, [unit, pollution]);
   
+  // Assistant API Implementation using Modern SDK (Frontend)
+  const ai = useMemo(() => {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || apiKey === 'REPLACE_ME') return null;
+    return new GoogleGenAI({ apiKey });
+  }, []);
+
   const generateAiInsight = React.useCallback(async (w: WeatherData, f: ForecastData) => {
     const cacheKey = `${w.name}-${unit}`;
     const now = Date.now();
@@ -482,28 +490,27 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
       return;
     }
 
+    if (!ai) {
+      console.warn('Gemini API key is missing. Falling back to local rules.');
+      applyFallbackInsights(w);
+      return;
+    }
+
     try {
       const prompt = `Act as an expert meteorologist. Return ONLY a JSON object:
       {
-        "clothing": "outfit for ${w.main.temp}°${unit === 'metric' ? 'C' : 'F'}, ${w.weather[0].description}",
-        "travel": "commute advice",
-        "health": "health risk",
-        "activity": "activity tip"
+        "clothing": "outfit recommendation for ${w.main.temp}°${unit === 'metric' ? 'C' : 'F'}, ${w.weather[0].description}",
+        "travel": "commute and travel advice",
+        "health": "health risks (allergies, heat, etc)",
+        "activity": "outdoor/indoor activity suggestion"
       }
-      Context: AQI ${pollution?.list[0].main.aqi || 'unknown'}. Keep each under 10 words.`;
+      Context: AQI ${pollution?.list[0].main.aqi || 'unknown'}. Keep each tip under 10 words. Use emojis.`;
 
-      const response = await fetch('/api/ai-insight', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
+      const result = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{ parts: [{ text: prompt }] }]
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || errorData.details || 'AI Insight API failed');
-      }
       
-      const result = await response.json();
       const output = result.text.replace(/```json/g, '').replace(/```/g, '').trim();
       const parsedData = JSON.parse(output);
       
@@ -512,8 +519,11 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
     } catch (err: any) {
       const errMsg = err?.message || String(err);
       const isQuota = errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.toLowerCase().includes('quota');
+      const isKey = errMsg.includes('API_KEY_INVALID') || errMsg.includes('key not valid');
       
-      if (isQuota) {
+      if (isKey) {
+        setSafeError("GEMINI_API_KEY is invalid. Please check your settings.");
+      } else if (isQuota) {
         lastThrottleRef.current = now;
         console.warn('Weather AI throttled. Falling back to local rules.');
       } else {
@@ -521,7 +531,7 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
       }
       applyFallbackInsights(w);
     }
-  }, [unit, pollution, applyFallbackInsights]);
+  }, [unit, pollution, applyFallbackInsights, ai]);
 
   const updateAllData = React.useCallback((wData: WeatherData, fData: ForecastData) => {
     setWeather(wData);
@@ -612,6 +622,12 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
     setChatHistory(prev => [...prev, { role: 'user', text: userMsg }]);
     setIsThinking(true);
 
+    if (!ai) {
+      setChatHistory(prev => [...prev, { role: 'ai', text: "I'm sorry, my AI brain (Gemini API key) isn't configured yet. Please add it in project settings! 🧠" }]);
+      setIsThinking(false);
+      return;
+    }
+
     try {
       const nextRain = forecast.list.find(item => item.weather[0].main.toLowerCase().includes('rain'));
       const rainContext = nextRain ? `Rain expected at ${new Date(nextRain.dt * 1000).toLocaleTimeString()}.` : "No rain expected soon.";
@@ -626,34 +642,33 @@ const formatLocalTime = (dt: number, timezoneOffset: number, options: Intl.DateT
       User Question: "${userMsg}"
       Answer succinctly, helpfully, and with local context. If they ask about activities, be specific to the weather. Use emojis. Max 40 words.`;
 
-      const response = await fetch('/api/ai-chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
+      const result = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{ parts: [{ text: prompt }] }]
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || errorData.details || 'AI Chat API failed');
-      }
-      const result = await response.json();
 
       setChatHistory(prev => [...prev, { role: 'ai', text: result.text || "I'm sorry, I couldn't process that." }]);
     } catch (e: any) {
       const errMsg = e?.message || String(e);
-      console.warn('Assistant API fallback triggered', errMsg);
-      let fallbackMsg = "Connecting to Satellite... 📡 ";
+      const isKey = errMsg.includes('API_KEY_INVALID') || errMsg.includes('key not valid');
       
-      if (userMsg.toLowerCase().includes('wear')) {
-        fallbackMsg += `Since it's ${Math.round(weather.main.temp)}°, ${weather.main.temp < 15 ? 'dress warmly with a coat!' : 'light comfortable clothes are best.'}`;
-      } else if (userMsg.toLowerCase().includes('rain')) {
-        const willRain = forecast.list.some(i => i.weather[0].main.toLowerCase().includes('rain'));
-        fallbackMsg += willRain ? "Keep an umbrella handy, rain is expected! ☔" : "No rain in the immediate outlook. ☀️";
+      if (isKey) {
+        setChatHistory(prev => [...prev, { role: 'ai', text: "Your Gemini API Key seems to be invalid. Please check your project settings. 🔑" }]);
       } else {
-        fallbackMsg += `In ${weather.name}, it's currently ${Math.round(weather.main.temp)}° and ${weather.weather[0].main}. Stay safe!`;
+        console.warn('Assistant API fallback triggered', errMsg);
+        let fallbackMsg = "Connecting to Satellite... 📡 ";
+        
+        if (userMsg.toLowerCase().includes('wear')) {
+          fallbackMsg += `Since it's ${Math.round(weather.main.temp)}°, ${weather.main.temp < 15 ? 'dress warmly with a coat!' : 'light comfortable clothes are best.'}`;
+        } else if (userMsg.toLowerCase().includes('rain')) {
+          const willRain = forecast.list.some(i => i.weather[0].main.toLowerCase().includes('rain'));
+          fallbackMsg += willRain ? "Keep an umbrella handy, rain is expected! ☔" : "No rain in the immediate outlook. ☀️";
+        } else {
+          fallbackMsg += `In ${weather.name}, it's currently ${Math.round(weather.main.temp)}° and ${weather.weather[0].main}. Stay safe!`;
+        }
+        
+        setChatHistory(prev => [...prev, { role: 'ai', text: fallbackMsg }]);
       }
-      
-      setChatHistory(prev => [...prev, { role: 'ai', text: fallbackMsg }]);
     } finally {
       setIsThinking(false);
     }
